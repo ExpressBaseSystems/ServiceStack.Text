@@ -412,16 +412,6 @@ namespace ServiceStack
             stream.Position = 0;
         }
 
-        public virtual LicenseKey VerifyLicenseKeyText(string licenseKeyText)
-        {
-            return licenseKeyText.ToLicenseKey();
-        }
-
-        public virtual LicenseKey VerifyLicenseKeyTextFallback(string licenseKeyText)
-        {
-            return licenseKeyText.ToLicenseKeyFallback();
-        }
-
         public virtual void BeginThreadAffinity()
         {
         }
