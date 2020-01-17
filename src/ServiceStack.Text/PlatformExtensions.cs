@@ -2,11 +2,13 @@ using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
 using System.Threading;
+using System.Xml;
 using ServiceStack.Text;
 
 namespace ServiceStack
@@ -130,6 +132,28 @@ namespace ServiceStack
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool HasAttribute<T>(this MethodInfo mi) => mi.AllAttributes().Any(x => x.GetType() == typeof(T));
+
+        private static readonly ConcurrentDictionary<Tuple<MemberInfo,Type>, bool> hasAttributeCache = new ConcurrentDictionary<Tuple<MemberInfo,Type>, bool>();
+        public static bool HasAttributeCached<T>(this MemberInfo memberInfo)
+        {
+            var key = new Tuple<MemberInfo,Type>(memberInfo, typeof(T));
+            if (hasAttributeCache.TryGetValue(key , out var hasAttr))
+                return hasAttr;
+
+            hasAttr = memberInfo is Type t 
+                ? t.AllAttributes().Any(x => x.GetType() == typeof(T))
+                : memberInfo is PropertyInfo pi
+                ? pi.AllAttributes().Any(x => x.GetType() == typeof(T))
+                : memberInfo is FieldInfo fi
+                ? fi.AllAttributes().Any(x => x.GetType() == typeof(T))
+                : memberInfo is MethodInfo mi
+                ? mi.AllAttributes().Any(x => x.GetType() == typeof(T))
+                : throw new NotSupportedException(memberInfo.GetType().Name);
+
+            hasAttributeCache[key] = hasAttr;
+
+            return hasAttr;
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool HasAttributeNamed(this Type type, string name)
@@ -387,20 +411,7 @@ namespace ServiceStack
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsDynamic(this Assembly assembly)
-        {
-            try
-            {
-                var isDyanmic = assembly is System.Reflection.Emit.AssemblyBuilder
-                                || string.IsNullOrEmpty(assembly.Location);
-                return isDyanmic;
-            }
-            catch (NotSupportedException)
-            {
-                //Ignore assembly.Location not supported in a dynamic assembly.
-                return true;
-            }
-        }
+        public static bool IsDynamic(this Assembly assembly) => ReflectionOptimizer.Instance.IsDynamic(assembly);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static MethodInfo GetStaticMethod(this Type type, string methodName, Type[] types)
@@ -535,8 +546,9 @@ namespace ServiceStack
 
         public static Type GetCollectionType(this Type type)
         {
-            return type.GetElementType() 
-                ?? type.GetGenericArguments().LastOrDefault(); //new[] { str }.Select(x => new Type()) => WhereSelectArrayIterator<string,Type>
+            return type.GetElementType()
+               ?? type.GetGenericArguments().LastOrDefault() //new[] { str }.Select(x => new Type()) => WhereSelectArrayIterator<string,Type>
+               ?? (type.BaseType != null && type.BaseType != typeof(object) ? type.BaseType.GetCollectionType() : null); //e.g. ArrayOfString : List<string>
         }
 
         static Dictionary<string, Type> GenericTypeCache = new Dictionary<string, Type>();
@@ -569,8 +581,9 @@ namespace ServiceStack
             do
             {
                 snapshot = GenericTypeCache;
-                newCache = new Dictionary<string, Type>(GenericTypeCache);
-                newCache[key] = genericType;
+                newCache = new Dictionary<string, Type>(GenericTypeCache) {
+                    [key] = genericType
+                };
 
             } while (!ReferenceEquals(
                 Interlocked.CompareExchange(ref GenericTypeCache, newCache, snapshot), snapshot));
@@ -610,26 +623,34 @@ namespace ServiceStack
                 if (SetValueFn == null)
                     return;
 
-                if (!Type.IsInstanceOfType(value))
+                if (Type != typeof(object))
                 {
-                    lock (this)
+                    if (value is IEnumerable<KeyValuePair<string, object>> dictionary)
                     {
-                        //Only caches object converter used on first use
-                        if (ConvertType == null)
-                        {
-                            ConvertType = value.GetType();
-                            ConvertValueFn = TypeConverter.CreateTypeConverter(ConvertType, Type);
-                        }
+                        value = dictionary.FromObjectDictionary(Type);
                     }
 
-                    if (ConvertType.IsInstanceOfType(value))
+                    if (!Type.IsInstanceOfType(value))
                     {
-                        value = ConvertValueFn(value);
-                    }
-                    else
-                    {
-                        var tempConvertFn = TypeConverter.CreateTypeConverter(value.GetType(), Type);
-                        value = tempConvertFn(value);
+                        lock (this)
+                        {
+                            //Only caches object converter used on first use
+                            if (ConvertType == null)
+                            {
+                                ConvertType = value.GetType();
+                                ConvertValueFn = TypeConverter.CreateTypeConverter(ConvertType, Type);
+                            }
+                        }
+
+                        if (ConvertType.IsInstanceOfType(value))
+                        {
+                            value = ConvertValueFn(value);
+                        }
+                        else
+                        {
+                            var tempConvertFn = TypeConverter.CreateTypeConverter(value.GetType(), Type);
+                            value = tempConvertFn(value);
+                        }
                     }
                 }
 
@@ -648,9 +669,9 @@ namespace ServiceStack
             if (obj is IDictionary<string, object> interfaceDict)
                 return new Dictionary<string, object>(interfaceDict);
 
+            var to = new Dictionary<string, object>();
             if (obj is Dictionary<string, string> stringDict)
             {
-                var to = new Dictionary<string, object>();
                 foreach (var entry in stringDict)
                 {
                     to[entry.Key] = entry.Value;
@@ -658,45 +679,189 @@ namespace ServiceStack
                 return to;
             }
 
-            var type = obj.GetType();
-
-            ObjectDictionaryDefinition def;
-            if (!toObjectMapCache.TryGetValue(type, out def))
-                toObjectMapCache[type] = def = CreateObjectDictionaryDefinition(type);
-
-            var dict = new Dictionary<string, object>();
-
-            foreach (var fieldDef in def.Fields)
+            if (obj is IDictionary d)
             {
-                dict[fieldDef.Name] = fieldDef.GetValueFn(obj);
+                foreach (var key in d.Keys)
+                {
+                    to[key.ToString()] = d[key];
+                }
+                return to;
             }
 
-            return dict;
-        }
+            if (obj is NameValueCollection nvc)
+            {
+                for (var i = 0; i < nvc.Count; i++)
+                {
+                    to[nvc.GetKey(i)] = nvc.Get(i);
+                }
+                return to;
+            }
 
-        public static object FromObjectDictionary(this IReadOnlyDictionary<string, object> values, Type type)
-        {
-            var alreadyDict = type == typeof(IReadOnlyDictionary<string, object>);
-            if (alreadyDict)
-                return true;
+            if (obj is IEnumerable<KeyValuePair<string, object>> objKvps)
+            {
+                foreach (var kvp in objKvps)
+                {
+                    to[kvp.Key] = kvp.Value;
+                }
+                return to;
+            }
+            if (obj is IEnumerable<KeyValuePair<string, string>> strKvps)
+            {
+                foreach (var kvp in strKvps)
+                {
+                    to[kvp.Key] = kvp.Value;
+                }
+                return to;
+            }
+
+            var type = obj.GetType();
+            if (type.GetKeyValuePairsTypes(out var keyType, out var valueType, out var kvpType) && obj is IEnumerable e)
+            {
+                var keyGetter = TypeProperties.Get(kvpType).GetPublicGetter("Key");
+                var valueGetter = TypeProperties.Get(kvpType).GetPublicGetter("Value");
+                
+                foreach (var entry in e)
+                {
+                    var key = keyGetter(entry);
+                    var value = valueGetter(entry);
+                    to[key.ConvertTo<string>()] = value;
+                }
+                return to;
+            }
+            
+
+            if (obj is KeyValuePair<string, object> objKvp)
+                return new Dictionary<string, object> { { nameof(objKvp.Key), objKvp.Key }, { nameof(objKvp.Value), objKvp.Value } };
+            if (obj is KeyValuePair<string, string> strKvp)
+                return new Dictionary<string, object> { { nameof(strKvp.Key), strKvp.Key }, { nameof(strKvp.Value), strKvp.Value } };
+            
+            if (type.GetKeyValuePairTypes(out _, out var _))
+            {
+                return new Dictionary<string, object> {
+                    { "Key", TypeProperties.Get(type).GetPublicGetter("Key")(obj).ConvertTo<string>() },
+                    { "Value", TypeProperties.Get(type).GetPublicGetter("Value")(obj) },
+                };
+            }
 
             if (!toObjectMapCache.TryGetValue(type, out var def))
                 toObjectMapCache[type] = def = CreateObjectDictionaryDefinition(type);
 
+            foreach (var fieldDef in def.Fields)
+            {
+                to[fieldDef.Name] = fieldDef.GetValueFn(obj);
+            }
+
+            return to;
+        }
+
+        public static Type GetKeyValuePairsTypeDef(this Type dictType)
+        {
+            //matches IDictionary<,>, IReadOnlyDictionary<,>, List<KeyValuePair<string, object>>
+            var genericDef = dictType.GetTypeWithGenericTypeDefinitionOf(typeof(IEnumerable<>));
+            if (genericDef == null) 
+                return null;
+            
+            var genericEnumType = genericDef.GetGenericArguments()[0];
+            return GetKeyValuePairTypeDef(genericEnumType);
+        }
+
+        public static Type GetKeyValuePairTypeDef(this Type genericEnumType) => genericEnumType.GetTypeWithGenericTypeDefinitionOf(typeof(KeyValuePair<,>));
+
+        public static bool GetKeyValuePairsTypes(this Type dictType, out Type keyType, out Type valueType) =>
+            dictType.GetKeyValuePairsTypes(out keyType, out valueType, out _);
+        
+        public static bool GetKeyValuePairsTypes(this Type dictType, out Type keyType, out Type valueType, out Type kvpType)
+        {
+            //matches IDictionary<,>, IReadOnlyDictionary<,>, List<KeyValuePair<string, object>>
+            var genericDef = dictType.GetTypeWithGenericTypeDefinitionOf(typeof(IEnumerable<>));
+            if (genericDef != null)
+            {
+                kvpType = genericDef.GetGenericArguments()[0];
+                if (GetKeyValuePairTypes(kvpType, out keyType, out valueType)) 
+                    return true;
+            }
+            kvpType = keyType = valueType = null;
+            return false;
+        }
+
+        public static bool GetKeyValuePairTypes(this Type kvpType, out Type keyType, out Type valueType)
+        {
+            var genericKvps = kvpType.GetTypeWithGenericTypeDefinitionOf(typeof(KeyValuePair<,>));
+            if (genericKvps != null)
+            {
+                var genericArgs = kvpType.GetGenericArguments();
+                keyType = genericArgs[0];
+                valueType = genericArgs[1];
+                return true;
+            }
+
+            keyType = valueType = null;
+            return false;
+        }
+
+        public static object FromObjectDictionary(this IEnumerable<KeyValuePair<string, object>> values, Type type)
+        {
+            if (values == null)
+                return null;
+            
+            var alreadyDict = typeof(IEnumerable<KeyValuePair<string, object>>).IsAssignableFrom(type);
+            if (alreadyDict)
+                return values;
+
             var to = type.CreateInstance();
+            if (to is IDictionary d)
+            {
+                if (type.GetKeyValuePairsTypes(out var toKeyType, out var toValueType))
+                {
+                    foreach (var entry in values)
+                    {
+                        var toKey = entry.Key.ConvertTo(toKeyType);
+                        var toValue = entry.Value.ConvertTo(toValueType);
+                        d[toKey] = toValue;
+                    }
+                }
+                else
+                {
+                    foreach (var entry in values)
+                    {
+                        d[entry.Key] = entry.Value;
+                    }
+                }
+            }
+            else
+            {
+                PopulateInstanceInternal(values, to, type);
+            }
+            
+            return to;
+        }
+
+        public static void PopulateInstance(this IEnumerable<KeyValuePair<string, object>> values, object instance)
+        {
+            if (values == null || instance == null)
+                return;
+            
+            PopulateInstanceInternal(values, instance, instance.GetType());
+        }
+
+        private static void PopulateInstanceInternal(IEnumerable<KeyValuePair<string, object>> values, object to, Type type)
+        {
+            if (!toObjectMapCache.TryGetValue(type, out var def))
+                toObjectMapCache[type] = def = CreateObjectDictionaryDefinition(type);
+
             foreach (var entry in values)
             {
                 if (!def.FieldsMap.TryGetValue(entry.Key, out var fieldDef) &&
                     !def.FieldsMap.TryGetValue(entry.Key.ToPascalCase(), out fieldDef)
-                    || entry.Value == null)
+                    || entry.Value == null 
+                    || entry.Value == DBNull.Value)
                     continue;
 
                 fieldDef.SetValue(to, entry.Value);
             }
-            return to;
         }
 
-        public static T FromObjectDictionary<T>(this IReadOnlyDictionary<string, object> values)
+        public static T FromObjectDictionary<T>(this IEnumerable<KeyValuePair<string, object>> values)
         {
             return (T)values.FromObjectDictionary(typeof(T));
         }
@@ -774,6 +939,38 @@ namespace ServiceStack
                     }
                 }
             }
+            return to;
+        }
+
+        public static Dictionary<string, object> MergeIntoObjectDictionary(this object obj, params object[] sources)
+        {
+            var to = obj.ToObjectDictionary();
+            foreach (var source in sources)
+            foreach (var entry in source.ToObjectDictionary())
+            {
+                to[entry.Key] = entry.Value;
+            }
+            return to;
+        }
+
+        public static Dictionary<string, string> ToStringDictionary(this IEnumerable<KeyValuePair<string, object>> from) => ToStringDictionary(from, null);
+
+        public static Dictionary<string, string> ToStringDictionary(this IEnumerable<KeyValuePair<string, object>> from, IEqualityComparer<string> comparer)
+        {
+            var to = comparer != null
+                ? new Dictionary<string, string>(comparer)
+                : new Dictionary<string, string>();
+
+            if (from != null)
+            {
+                foreach (var entry in from)
+                {
+                    to[entry.Key] = entry.Value is string s
+                        ? s
+                        : entry.Value.ConvertTo<string>();
+                }
+            }
+
             return to;
         }
     }

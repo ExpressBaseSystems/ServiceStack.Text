@@ -17,57 +17,100 @@ namespace ServiceStack
     [DataContract(Namespace = "http://schemas.servicestack.net/types")]
     public class CustomHttpResult { }
 
+    /// <summary>
+    /// Customize ServiceStack AutoMapping Behavior
+    /// </summary>
+    public static class AutoMapping
+    {
+        /// <summary>
+        /// Register Type to Type AutoMapping converter 
+        /// </summary>
+        public static void RegisterConverter<From, To>(Func<From, To> converter)
+        {
+            JsConfig.InitStatics();
+            AutoMappingUtils.converters[Tuple.Create(typeof(From), typeof(To))] = x => converter((From)x);
+        }
+
+        /// <summary>
+        /// Ignore Type to Type Mapping (including collections containing them) 
+        /// </summary>
+        public static void IgnoreMapping<From, To>() => IgnoreMapping(typeof(From), typeof(To));
+
+        /// <summary>
+        /// Ignore Type to Type Mapping (including collections containing them) 
+        /// </summary>
+        public static void IgnoreMapping(Type fromType, Type toType)
+        {
+            JsConfig.InitStatics();
+            AutoMappingUtils.ignoreMappings[Tuple.Create(fromType, toType)] = true;
+        }
+
+        public static void RegisterPopulator<Target, Source>(Action<Target, Source> populator)
+        {
+            JsConfig.InitStatics();
+            AutoMappingUtils.populators[Tuple.Create(typeof(Target), typeof(Source))] = (a,b) => populator((Target)a,(Source)b);
+        }
+    }
+
     public static class AutoMappingUtils
     {
-        public static T ConvertTo<T>(this object from)
+        internal static readonly ConcurrentDictionary<Tuple<Type, Type>, GetMemberDelegate> converters
+            = new ConcurrentDictionary<Tuple<Type, Type>, GetMemberDelegate>();
+
+        internal static readonly ConcurrentDictionary<Tuple<Type, Type>, PopulateMemberDelegate> populators
+            = new ConcurrentDictionary<Tuple<Type, Type>, PopulateMemberDelegate>();
+
+        internal static readonly ConcurrentDictionary<Tuple<Type, Type>,bool> ignoreMappings
+            = new ConcurrentDictionary<Tuple<Type, Type>,bool>();
+
+        public static void Reset()
+        {
+            converters.Clear();
+            populators.Clear();
+            ignoreMappings.Clear();
+            AssignmentDefinitionCache.Clear();
+        }
+
+        public static bool ShouldIgnoreMapping(Type fromType, Type toType) =>
+            ignoreMappings.ContainsKey(Tuple.Create(fromType, toType));
+
+        public static GetMemberDelegate GetConverter(Type fromType, Type toType)
+        {
+            if (converters.IsEmpty)
+                return null;
+
+            var key = Tuple.Create(fromType, toType);
+            return converters.TryGetValue(key, out var converter)
+                ? converter
+                : null;
+        }
+
+        public static PopulateMemberDelegate GetPopulator(Type targetType, Type sourceType)
+        {
+            if (populators.IsEmpty)
+                return null;
+
+            var key = Tuple.Create(targetType, sourceType);
+            return populators.TryGetValue(key, out var populator)
+                ? populator
+                : null;
+        }
+
+        public static T ConvertTo<T>(this object from, T defaultValue) =>
+            from == null || (from is string s && s == string.Empty)
+                ? defaultValue
+                : from.ConvertTo<T>();
+
+        public static T ConvertTo<T>(this object from) => from.ConvertTo<T>(skipConverters:false);
+        public static T ConvertTo<T>(this object from, bool skipConverters)
         {
             if (from == null)
-                return default(T);
+                return default;
 
-            var fromType = from.GetType();
-            if (fromType == typeof(T))
-                return (T)from;
+            if (from is T t)
+                return t;
 
-            if (fromType.IsValueType || typeof(T).IsValueType)
-            {
-                if (!fromType.IsEnum && !typeof(T).IsEnum)
-                {
-                    if (typeof(T) == typeof(char) && from is string s)
-                        return (T)(s.Length > 0 ? (object) s[0] : null);
-                    if (typeof(T) == typeof(string) && from is char c)
-                        return (T)(object)c.ToString();
-
-                    var destNumberType = DynamicNumber.GetNumber(typeof(T));
-                    var value = destNumberType?.ConvertFrom(from);
-                    if (value != null)
-                    {
-                        if (typeof(T) == typeof(char))
-                            return (T)(object)value.ToString()[0];
-
-                        return (T)value;
-                    }
-
-                    if (typeof(T) == typeof(string))
-                    {
-                        var srcNumberType = DynamicNumber.GetNumber(from.GetType());
-                        if (srcNumberType != null)
-                            return (T)(object)srcNumberType.ToString(from);
-                    }
-                }
-
-                return (T)ChangeValueType(from, typeof(T));
-            }
-
-            if (typeof(IEnumerable).IsAssignableFrom(typeof(T)))
-            {
-                var listResult = TranslateListWithElements.TryTranslateCollections(
-                    fromType, typeof(T), from);
-
-                return (T)listResult;
-            }
-
-            var to = typeof(T).CreateInstance<T>();
-            return to.PopulateWith(from);
+            return (T)ConvertTo(from, typeof(T), skipConverters);
         }
 
         public static T CreateCopy<T>(this T from)
@@ -75,11 +118,9 @@ namespace ServiceStack
             if (typeof(T).IsValueType)
                 return (T)ChangeValueType(from, typeof(T));
 
-            if (typeof(IEnumerable).IsAssignableFrom(typeof(T)))
+            if (typeof(IEnumerable).IsAssignableFrom(typeof(T)) && typeof(T) != typeof(string))
             {
-                var listResult = TranslateListWithElements.TryTranslateCollections(
-                    from.GetType(), typeof(T), from);
-
+                var listResult = TranslateListWithElements.TryTranslateCollections(from.GetType(), typeof(T), from);
                 return (T)listResult;
             }
 
@@ -93,38 +134,190 @@ namespace ServiceStack
             return to;
         }
 
-        public static object ConvertTo(this object from, Type type)
+        public static object ConvertTo(this object from, Type toType) => from.ConvertTo(toType, skipConverters: false);
+        public static object ConvertTo(this object from, Type toType, bool skipConverters)
         {
             if (from == null)
                 return null;
 
-            if (from.GetType() == type)
+            var fromType = from.GetType();
+            if (ShouldIgnoreMapping(fromType, toType))
+                return null;
+
+            if (!skipConverters)
+            {
+                var converter = GetConverter(fromType, toType);
+                if (converter != null)
+                    return converter(from);
+            }
+
+            if (fromType == toType || toType == typeof(object))
                 return from;
 
-            if (from.GetType().IsValueType || type.IsValueType)
-                return ChangeValueType(from, type);
+            if (fromType.IsValueType || toType.IsValueType)
+                return ChangeValueType(from, toType);
 
-            if (typeof(IEnumerable).IsAssignableFrom(type))
+            var mi = GetImplicitCastMethod(fromType, toType);
+            if (mi != null)
+                return mi.Invoke(null, new[] { from });
+
+            if (from is string str)
+                return TypeSerializer.DeserializeFromString(str, toType);
+            if (from is ReadOnlyMemory<char> rom)
+                return TypeSerializer.DeserializeFromSpan(toType, rom.Span);
+
+            if (toType == typeof(string))
+                return from.ToJsv();
+            
+            if (typeof(IEnumerable).IsAssignableFrom(toType))
             {
-                var listResult = TranslateListWithElements.TryTranslateCollections(
-                    from.GetType(), type, from);
-
+                var listResult = TryConvertCollections(fromType, toType, from);
                 return listResult;
             }
 
-            var to = type.CreateInstance();
-            return to.PopulateInstance(from);
+            if (from is IEnumerable<KeyValuePair<string, object>> objDict)
+                return objDict.FromObjectDictionary(toType);
+
+            if (from is IEnumerable<KeyValuePair<string, string>> strDict)
+                return strDict.ToObjectDictionary().FromObjectDictionary(toType);
+
+            var to = toType.CreateInstance();
+            return to.PopulateWith(from);
         }
 
-        private static object ChangeValueType(object from, Type type)
+        public static MethodInfo GetImplicitCastMethod(Type fromType, Type toType)
         {
-            if (from is string strValue)
-                return TypeSerializer.DeserializeFromString(strValue, type);
+            foreach (var mi in fromType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (mi.Name == "op_Implicit" && mi.ReturnType == toType &&
+                    mi.GetParameters().FirstOrDefault()?.ParameterType == fromType)
+                {
+                    return mi;
+                }
+            }
+            foreach (var mi in toType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (mi.Name == "op_Implicit" && mi.ReturnType == toType &&
+                    mi.GetParameters().FirstOrDefault()?.ParameterType == fromType)
+                {
+                    return mi;
+                }
+            }
+            return null;
+        }
+        
+        public static MethodInfo GetExplicitCastMethod(Type fromType, Type toType)
+        {
+            foreach (var mi in toType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (mi.Name == "op_Explicit" && mi.ReturnType == toType &&
+                    mi.GetParameters().FirstOrDefault()?.ParameterType == fromType)
+                {
+                    return mi;
+                }
+            }
+            foreach (var mi in fromType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (mi.Name == "op_Explicit" && mi.ReturnType == toType &&
+                    mi.GetParameters().FirstOrDefault()?.ParameterType == fromType)
+                {
+                    return mi;
+                }
+            }
+            return null;
+        }
+        
+        public static object ChangeValueType(object from, Type toType)
+        {
+            var s = from as string;
+            
+            var fromType = from.GetType();
+            if (!fromType.IsEnum && !toType.IsEnum)
+            {
+                var toString = toType == typeof(string);
+                if (toType == typeof(char) && s != null)
+                    return s.Length > 0 ? (object) s[0] : null;
+                if (toString && from is char c)
+                    return c.ToString();
+                if (toType == typeof(TimeSpan) && from is long ticks)
+                    return new TimeSpan(ticks);
+                if (toType == typeof(long) && from is TimeSpan time)
+                    return time.Ticks;
 
-            if (type == typeof(string))
+                var destNumberType = DynamicNumber.GetNumber(toType);
+                if (destNumberType != null)
+                {
+                    if (s != null && s == string.Empty)
+                        return destNumberType.DefaultValue;
+                    
+                    var value = destNumberType.ConvertFrom(from);
+                    if (value != null)
+                    {
+                        return toType == typeof(char) 
+                            ? value.ToString()[0] 
+                            : value;
+                    }
+                }
+
+                if (toString)
+                {
+                    var srcNumberType = DynamicNumber.GetNumber(from.GetType());
+                    if (srcNumberType != null)
+                        return srcNumberType.ToString(from);
+                }
+            }
+
+            var mi = GetImplicitCastMethod(fromType, toType);
+            if (mi != null)
+                return mi.Invoke(null, new[] { from });
+
+            mi = GetExplicitCastMethod(fromType, toType);
+            if (mi != null)
+                return mi.Invoke(null, new[] { from });
+
+            if (s != null)
+                return TypeSerializer.DeserializeFromString(s, toType);
+
+            if (toType == typeof(string))
                 return from.ToJsv();
 
-            return Convert.ChangeType(from, type, provider: null);
+            if (toType.HasInterface(typeof(IConvertible)))
+            {
+                return Convert.ChangeType(from, toType, provider: null);
+            }
+
+            var fromKvpType = fromType.GetTypeWithGenericTypeDefinitionOf(typeof(KeyValuePair<,>));
+            if (fromKvpType != null)
+            {
+                var fromProps = TypeProperties.Get(fromKvpType);
+                var fromKey = fromProps.GetPublicGetter("Key")(from);
+                var fromValue = fromProps.GetPublicGetter("Value")(from);
+
+                var toKvpType = toType.GetTypeWithGenericTypeDefinitionOf(typeof(KeyValuePair<,>));
+                if (toKvpType != null)
+                {
+                    
+                    var toKvpArgs = toKvpType.GetGenericArguments();
+                    var toCtor = toKvpType.GetConstructor(toKvpArgs);
+                    var to = toCtor.Invoke(new[] { fromKey.ConvertTo(toKvpArgs[0]), fromValue.ConvertTo(toKvpArgs[1]) });
+                    return to;
+                }
+
+                if (typeof(IDictionary).IsAssignableFrom(toType))
+                {
+                    var genericDef = toType.GetTypeWithGenericTypeDefinitionOf(typeof(IDictionary<,>));
+                    var toArgs = genericDef.GetGenericArguments();
+                    var toKeyType = toArgs[0];
+                    var toValueType = toArgs[1];
+                  
+                    var to = (IDictionary)toType.CreateInstance();
+                    to["Key"] = fromKey.ConvertTo(toKeyType);
+                    to["Value"] = fromValue.ConvertTo(toValueType);
+                    return to;
+                }
+            }
+
+            return TypeSerializer.DeserializeFromString(from.ToJsv(), toType);
         }
 
         public static object ChangeTo(this string strValue, Type type)
@@ -149,8 +342,7 @@ namespace ServiceStack
         {
             lock (TypePropertyNamesMap)
             {
-                List<string> propertyNames;
-                if (!TypePropertyNamesMap.TryGetValue(type, out propertyNames))
+                if (!TypePropertyNamesMap.TryGetValue(type, out var propertyNames))
                 {
                     propertyNames = type.Properties().ToList().ConvertAll(x => x.Name);
                     TypePropertyNamesMap[type] = propertyNames;
@@ -202,7 +394,7 @@ namespace ServiceStack
         private static object PopulateObjectInternal(object obj, Dictionary<Type, int> recursionInfo)
         {
             if (obj == null) return null;
-            if (obj is string) return obj; // prevents it from dropping into the char[] Chars property.  Sheesh
+            if (obj is string) return obj; // prevents it from dropping into the char[] Chars property.
             var type = obj.GetType();
 
             var members = type.GetPublicMembers();
@@ -252,7 +444,6 @@ namespace ServiceStack
 
             return AssignmentDefinitionCache.GetOrAdd(cacheKey, delegate
             {
-
                 var definition = new AssignmentDefinition
                 {
                     ToType = toType,
@@ -264,8 +455,7 @@ namespace ServiceStack
 
                 foreach (var assignmentMember in readMap)
                 {
-                    AssignmentMember writeMember;
-                    if (writeMap.TryGetValue(assignmentMember.Key, out writeMember))
+                    if (writeMap.TryGetValue(assignmentMember.Key, out var writeMember))
                     {
                         definition.AddMatch(assignmentMember.Key, assignmentMember.Value, writeMember);
                     }
@@ -317,38 +507,7 @@ namespace ServiceStack
                     map[info.Name] = new AssignmentMember(fieldInfo.FieldType, fieldInfo);
                     continue;
                 }
-
-                var methodInfo = info as MethodInfo;
-                if (methodInfo != null)
-                {
-                    var parameterInfos = methodInfo.GetParameters();
-                    if (isReadable)
-                    {
-                        if (parameterInfos.Length == 0)
-                        {
-                            var name = info.Name.StartsWith("get_") ? info.Name.Substring(4) : info.Name;
-                            if (!map.ContainsKey(name))
-                            {
-                                map[name] = new AssignmentMember(methodInfo.ReturnType, methodInfo);
-                                continue;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        if (parameterInfos.Length == 1 && methodInfo.ReturnType == typeof(void))
-                        {
-                            var name = info.Name.StartsWith("set_") ? info.Name.Substring(4) : info.Name;
-                            if (!map.ContainsKey(name))
-                            {
-                                map[name] = new AssignmentMember(parameterInfos[0].ParameterType, methodInfo);
-                                continue;
-                            }
-                        }
-                    }
-                }
             }
-
             return map;
         }
 
@@ -363,6 +522,7 @@ namespace ServiceStack
             return to;
         }
 
+        [Obsolete("Use PopulateWithNonDefaultValues")]
         public static object PopulateInstance(this object to, object from)
         {
             if (to == null || from == null)
@@ -418,10 +578,10 @@ namespace ServiceStack
                 return;
             }
 
-            var propertySetMetodInfo = propertyInfo.GetSetMethod(nonPublic:true);
-            if (propertySetMetodInfo != null)
+            var propertySetMethodInfo = propertyInfo.GetSetMethod(nonPublic:true);
+            if (propertySetMethodInfo != null)
             {
-                propertySetMetodInfo.Invoke(obj, new[] { value });
+                propertySetMethodInfo.Invoke(obj, new[] { value });
             }
         }
 
@@ -546,17 +706,17 @@ namespace ServiceStack
             }
         }
 
-        public static void SetGenericCollection(Type realisedListType, object genericObj, Dictionary<Type, int> recursionInfo)
+        public static void SetGenericCollection(Type realizedListType, object genericObj, Dictionary<Type, int> recursionInfo)
         {
-            var args = realisedListType.GetGenericArguments();
+            var args = realizedListType.GetGenericArguments();
             if (args.Length != 1)
             {
-                Tracer.Instance.WriteError("Found a generic list that does not take one generic argument: {0}", realisedListType);
+                Tracer.Instance.WriteError("Found a generic list that does not take one generic argument: {0}", realizedListType);
 
                 return;
             }
 
-            var methodInfo = realisedListType.GetMethodInfo("Add");
+            var methodInfo = realizedListType.GetMethodInfo("Add");
             if (methodInfo != null)
             {
                 var argValues = CreateDefaultValues(args, recursionInfo);
@@ -616,6 +776,225 @@ namespace ServiceStack
                 }
             }
             while ((baseType = baseType.BaseType) != null);
+        }
+        
+        public static object TryConvertCollections(Type fromType, Type toType, object fromValue)
+        {
+            if (fromValue is IEnumerable values)
+            {
+                var toEnumObjs = toType == typeof(IEnumerable<object>);
+                if (typeof(IList).IsAssignableFrom(toType) || toEnumObjs)
+                {
+                    var to = (IList) (toType.IsArray || toEnumObjs ? new List<object>() : toType.CreateInstance());
+                    var elType = toType.GetCollectionType();
+                    foreach (var item in values)
+                    {
+                        to.Add(elType != null ? item.ConvertTo(elType) : item);
+                    }
+                    if (elType != null && toType.IsArray)
+                    {
+                        var arr = Array.CreateInstance(elType, to.Count);
+                        to.CopyTo(arr, 0);
+                        return arr;
+                    }
+                    
+                    return to;
+                }
+                
+                if (fromValue is IDictionary d)
+                {
+                    var obj = toType.CreateInstance();
+                    switch (obj)
+                    {
+                        case List<KeyValuePair<string, string>> toList: {
+                            foreach (var key in d.Keys)
+                            {
+                                toList.Add(new KeyValuePair<string, string>(key.ConvertTo<string>(), d[key].ConvertTo<string>()));
+                            }
+                            return toList;
+                        }
+                        case List<KeyValuePair<string, object>> toObjList: {
+                            foreach (var key in d.Keys)
+                            {
+                                toObjList.Add(new KeyValuePair<string, object>(key.ConvertTo<string>(), d[key]));
+                            }
+                            return toObjList;
+                        }
+                        case IDictionary toDict: {
+                            if (toType.GetKeyValuePairsTypes(out var toKeyType, out var toValueType))
+                            {
+                                foreach (var key in d.Keys)
+                                {
+                                    var toKey = toKeyType != null
+                                        ? key.ConvertTo(toKeyType)
+                                        : key;
+                                    var toValue = d[key].ConvertTo(toValueType);
+                                    toDict[toKey] = toValue;
+                                }
+                                return toDict;
+                            }
+                            else
+                            {
+                                var from = fromValue.ToObjectDictionary();
+                                var to = from.FromObjectDictionary(toType);
+                                return to;
+                            }
+                        }
+                    }
+                }
+                
+                var genericDef = fromType.GetTypeWithGenericTypeDefinitionOf(typeof(IEnumerable<>));
+                if (genericDef != null)
+                {
+                    var genericEnumType = genericDef.GetGenericArguments()[0];
+                    var genericKvps = genericEnumType.GetTypeWithGenericTypeDefinitionOf(typeof(KeyValuePair<,>));
+                    if (genericKvps != null)
+                    {
+                        // Improve perf with Specialized handling of common KVP combinations 
+                        var obj = toType.CreateInstance();
+                        if (fromValue is IEnumerable<KeyValuePair<string, string>> sKvps)
+                        {
+                            switch (obj) {
+                                case IDictionary toDict: {
+                                    toType.GetKeyValuePairsTypes(out var toKeyType, out var toValueType);
+                                    foreach (var entry in sKvps)
+                                    {
+                                        var toKey = toKeyType != null
+                                            ? entry.Key.ConvertTo(toKeyType)
+                                            : entry.Key;
+                                        toDict[toKey] = toValueType != null
+                                            ? entry.Value.ConvertTo(toValueType)
+                                            : entry.Value;
+                                    }
+                                    return toDict;
+                                }
+                                case List<KeyValuePair<string, string>> toList: {
+                                    foreach (var entry in sKvps)
+                                    {
+                                        toList.Add(new KeyValuePair<string, string>(entry.Key, entry.Value));
+                                    }
+                                    return toList;
+                                }
+                                case List<KeyValuePair<string, object>> toObjList: {
+                                    foreach (var entry in sKvps)
+                                    {
+                                        toObjList.Add(new KeyValuePair<string, object>(entry.Key, entry.Value));
+                                    }
+                                    return toObjList;
+                                }
+                            }
+                        }
+                        else if (fromValue is IEnumerable<KeyValuePair<string, object>> oKvps)
+                        {
+                            switch (obj) {
+                                case IDictionary toDict:
+                                {
+                                    toType.GetKeyValuePairsTypes(out var toKeyType, out var toValueType);
+                                    foreach (var entry in oKvps)
+                                    {
+                                        var toKey = entry.Key.ConvertTo<string>();
+                                        toDict[toKey] = toValueType != null
+                                            ? entry.Value.ConvertTo(toValueType)
+                                            : entry.Value;
+                                    }
+                                    return toDict;
+                                }
+                                case List<KeyValuePair<string, string>> toList: {
+                                    foreach (var entry in oKvps)
+                                    {
+                                        toList.Add(new KeyValuePair<string, string>(entry.Key, entry.Value.ConvertTo<string>()));
+                                    }
+                                    return toList;
+                                }
+                                case List<KeyValuePair<string, object>> toObjList: {
+                                    foreach (var entry in oKvps)
+                                    {
+                                        toObjList.Add(new KeyValuePair<string, object>(entry.Key, entry.Value));
+                                    }
+                                    return toObjList;
+                                }
+                            }
+                        }
+                        
+                        
+                        // Fallback for handling any KVP combo
+                        var toKvpDefType = toType.GetKeyValuePairsTypeDef();
+                        switch (obj) {
+                            case IDictionary toDict:
+                            {
+                                var keyProp = TypeProperties.Get(toKvpDefType).GetPublicGetter("Key");
+                                var valueProp = TypeProperties.Get(toKvpDefType).GetPublicGetter("Value");
+                                
+                                foreach (var entry in values)
+                                {
+                                    var toKvp = entry.ConvertTo(toKvpDefType);
+                                    var toKey = keyProp(toKvp);
+                                    var toValue = valueProp(toKvp);
+                                    toDict[toKey] = toValue;
+                                }
+                                return toDict;
+                            }
+                            case List<KeyValuePair<string, string>> toStringList: {
+                                foreach (var entry in values)
+                                {
+                                    var toEntry = entry.ConvertTo(toKvpDefType);
+                                    toStringList.Add((KeyValuePair<string, string>) toEntry);
+                                }
+                                return toStringList;
+                            }
+                            case List<KeyValuePair<string, object>> toObjList: {
+                                foreach (var entry in values)
+                                {
+                                    var toEntry = entry.ConvertTo(toKvpDefType);
+                                    toObjList.Add((KeyValuePair<string, object>) toEntry);
+                                }
+                                return toObjList;
+                            }
+                            case IEnumerable toList:
+                            {
+                                var addMethod = toType.GetMethod(nameof(IList.Add), new[] {toKvpDefType});
+                                if (addMethod != null)
+                                {
+                                    foreach (var entry in values)
+                                    {
+                                        var toEntry = entry.ConvertTo(toKvpDefType);
+                                        addMethod.Invoke(toList, new[] { toEntry });
+                                    }
+                                    return toList;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                var fromElementType = fromType.GetCollectionType();
+                var toElementType = toType.GetCollectionType();
+
+                if (fromElementType != null && toElementType != null && fromElementType != toElementType && 
+                    !(typeof(IDictionary).IsAssignableFrom(fromElementType) || typeof(IDictionary).IsAssignableFrom(toElementType)))
+                {
+                    var to = new List<object>();
+                    foreach (var item in values)
+                    {
+                        var toItem = item.ConvertTo(toElementType);
+                        to.Add(toItem);
+                    }
+                    var ret = TranslateListWithElements.TryTranslateCollections(to.GetType(), toType, to);
+                    return ret ?? fromValue;
+                }
+            }
+            else if (fromType.IsClass && 
+                 (typeof(IDictionary).IsAssignableFrom(toType) || 
+                  typeof(IEnumerable<KeyValuePair<string,object>>).IsAssignableFrom(toType) || 
+                  typeof(IEnumerable<KeyValuePair<string,string>>).IsAssignableFrom(toType)))
+            {
+                var fromDict = fromValue.ToObjectDictionary();
+                return TryConvertCollections(fromType.GetType(), toType, fromDict);
+            }
+
+            var listResult = TranslateListWithElements.TryTranslateCollections(fromType, toType, fromValue);
+            return listResult ?? fromValue;
         }
     }
 
@@ -698,6 +1077,34 @@ namespace ServiceStack
 
         public void AddMatch(string name, AssignmentMember readMember, AssignmentMember writeMember)
         {
+            if (AutoMappingUtils.ShouldIgnoreMapping(readMember.Type,writeMember.Type))
+                return;
+
+            // Ignore mapping collections if Element Types are ignored
+            if (typeof(IEnumerable).IsAssignableFrom(readMember.Type) && typeof(IEnumerable).IsAssignableFrom(writeMember.Type))
+            {
+                var fromGenericDef = readMember.Type.GetTypeWithGenericTypeDefinitionOf(typeof(IDictionary<,>));
+                var toGenericDef = writeMember.Type.GetTypeWithGenericTypeDefinitionOf(typeof(IDictionary<,>));
+                if (fromGenericDef != null && toGenericDef != null)
+                {
+                    // Check if to/from Key or Value Types are ignored   
+                    var fromArgs = fromGenericDef.GetGenericArguments();
+                    var toArgs = toGenericDef.GetGenericArguments();
+                    if (AutoMappingUtils.ShouldIgnoreMapping(fromArgs[0],toArgs[0]))
+                        return;
+                    if (AutoMappingUtils.ShouldIgnoreMapping(fromArgs[1],toArgs[1]))
+                        return;
+                }
+                else if (readMember.Type != typeof(string) && writeMember.Type != typeof(string))
+                {
+                    var elFromType = readMember.Type.GetCollectionType();
+                    var elToType = writeMember.Type.GetCollectionType();
+
+                    if (AutoMappingUtils.ShouldIgnoreMapping(elFromType,elToType))
+                        return;
+                }
+            }
+
             this.AssignmentMemberMap[name] = new AssignmentEntry(name, readMember, writeMember);
         }
 
@@ -741,20 +1148,24 @@ namespace ServiceStack
 
                 if (fromMember.PropertyInfo != null && propertyInfoPredicate != null)
                 {
-                    if (!propertyInfoPredicate(fromMember.PropertyInfo)) continue;
+                    if (!propertyInfoPredicate(fromMember.PropertyInfo)) 
+                        continue;
                 }
 
                 var fromType = fromMember.Type;
                 var toType = toMember.Type;
                 try
                 {
+                    
                     var fromValue = assignmentEntry.GetValueFn(from);
 
-                    if (valuePredicate != null)
+                    if (valuePredicate != null
+                        && fromType == toType) // don't short-circuit nullable <-> non-null values
                     {
-                        if (!valuePredicate(fromValue, fromMember.PropertyInfo.PropertyType)) continue;
+                        if (!valuePredicate(fromValue, fromMember.PropertyInfo.PropertyType)) 
+                            continue;
                     }
-
+                    
                     if (assignmentEntry.ConvertValueFn != null)
                     {
                         fromValue = assignmentEntry.ConvertValueFn(fromValue);
@@ -770,11 +1181,16 @@ namespace ServiceStack
                         ToType.FullName, toType.Name, ex);
                 }
             }
+
+            var populator = AutoMappingUtils.GetPopulator(to.GetType(), from.GetType());
+            populator?.Invoke(to, from);
         }
     }
 
     public delegate object GetMemberDelegate(object instance);
     public delegate object GetMemberDelegate<T>(T instance);
+
+    public delegate void PopulateMemberDelegate(object target, object source);
 
     public delegate void SetMemberDelegate(object instance, object value);
     public delegate void SetMemberDelegate<T>(T instance, object value);
@@ -787,12 +1203,16 @@ namespace ServiceStack
         {
             if (fromType == toType)
                 return null;
+            
+            var converter = AutoMappingUtils.GetConverter(fromType, toType);
+            if (converter != null)
+                return converter;
 
             if (fromType == typeof(string))
                 return fromValue => TypeSerializer.DeserializeFromString((string)fromValue, toType);
 
             if (toType == typeof(string))
-                return TypeSerializer.SerializeToString;
+                return o => TypeSerializer.SerializeToString(o).StripQuotes();
             
             var underlyingToType = Nullable.GetUnderlyingType(toType) ?? toType;
             var underlyingFromType = Nullable.GetUnderlyingType(fromType) ?? fromType;
@@ -810,23 +1230,13 @@ namespace ServiceStack
                 if (underlyingToType.IsIntegerType())
                     return fromValue => Convert.ChangeType(fromValue, underlyingToType, null);
             }
-            else if (toType.IsNullableType())
+            else if (typeof(IEnumerable).IsAssignableFrom(fromType) && underlyingToType != typeof(string))
             {
-                return null;
+                return fromValue => AutoMappingUtils.TryConvertCollections(fromType, underlyingToType, fromValue);
             }
-            else if (typeof(IEnumerable).IsAssignableFrom(fromType))
+            else if (underlyingToType.IsValueType)
             {
-                return fromValue =>
-                {
-                    var listResult = TranslateListWithElements.TryTranslateCollections(
-                        fromType, toType, fromValue);
-
-                    return listResult ?? fromValue;
-                };
-            }
-            else if (toType.IsValueType)
-            {
-                return fromValue => Convert.ChangeType(fromValue, toType, provider: null);
+                return fromValue => AutoMappingUtils.ChangeValueType(fromValue, underlyingToType);
             }
             else 
             {
@@ -834,6 +1244,8 @@ namespace ServiceStack
                 {
                     if (fromValue == null)
                         return fromValue;
+                    if (toType == typeof(string))
+                        return fromValue.ToJsv();
 
                     var toValue = toType.CreateInstance();
                     toValue.PopulateWith(fromValue);

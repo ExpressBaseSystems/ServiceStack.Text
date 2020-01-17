@@ -11,14 +11,13 @@
 //
 
 using System;
+using System.Runtime.CompilerServices;
+using System.Runtime.Serialization;
 
 namespace ServiceStack.Text.Common
 {
     internal static class ParseUtils
     {
-        public static readonly IPropertyNameResolver DefaultPropertyNameResolver = new DefaultPropertyNameResolver();
-        public static readonly IPropertyNameResolver LenientPropertyNameResolver = new LenientPropertyNameResolver();
-
         public static object NullValueType(Type type)
         {
             return type.GetDefaultValue();
@@ -62,14 +61,15 @@ namespace ServiceStack.Text.Common
             if (str == null)
                 return null;
 
-            if (JsConfig.EmitLowercaseUnderscoreNames)
+            if (JsConfig.TextCase == TextCase.SnakeCase)
             {
                 string[] names = Enum.GetNames(enumType);
                 if (Array.IndexOf(names, str) == -1)    // case sensitive ... could use Linq Contains() extension with StringComparer.InvariantCultureIgnoreCase instead for a slight penalty
                     str = str.Replace("_", "");
             }
 
-            return Enum.Parse(enumType, str, ignoreCase: true);
+            var enumInfo = CachedTypeInfo.Get(enumType).EnumInfo;
+            return enumInfo.Parse(str);
         }
     }
 

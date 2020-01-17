@@ -33,8 +33,7 @@ namespace ServiceStack.Text.Json
         {
             try
             {
-                WriteObjectDelegate writeFn;
-                if (WriteFnCache.TryGetValue(type, out writeFn)) return writeFn;
+                if (WriteFnCache.TryGetValue(type, out var writeFn)) return writeFn;
 
                 var genericType = typeof(JsonWriter<>).MakeGenericType(type);
                 var mi = genericType.GetStaticMethod("WriteFn");
@@ -68,8 +67,7 @@ namespace ServiceStack.Text.Json
         {
             try
             {
-                TypeInfo writeFn;
-                if (JsonTypeInfoCache.TryGetValue(type, out writeFn)) return writeFn;
+                if (JsonTypeInfoCache.TryGetValue(type, out var writeFn)) return writeFn;
 
                 var genericType = typeof(JsonWriter<>).MakeGenericType(type);
                 var mi = genericType.GetStaticMethod("GetTypeInfo");
@@ -107,12 +105,8 @@ namespace ServiceStack.Text.Json
 
             try
             {
-                if (++JsState.Depth > JsConfig.MaxDepth)
-                {
-                    Tracer.Instance.WriteError("Exceeded MaxDepth limit of {0} attempting to serialize {1}"
-                        .Fmt(JsConfig.MaxDepth, value.GetType().Name));
+                if (!JsState.Traverse(value))
                     return;
-                }
 
                 var type = value.GetType();
                 var writeFn = type == typeof(object)
@@ -126,7 +120,7 @@ namespace ServiceStack.Text.Json
             }
             finally
             {
-                JsState.Depth--;
+                JsState.UnTraverse();
             }
         }
 
@@ -148,7 +142,6 @@ namespace ServiceStack.Text.Json
     public class TypeInfo
     {
         internal bool EncodeMapKey;
-        internal bool IsNumeric;
     }
 
     /// <summary>
@@ -195,7 +188,6 @@ namespace ServiceStack.Text.Json
             TypeInfo = new TypeInfo
             {
                 EncodeMapKey = typeof(T) == typeof(bool) || isNumeric,
-                IsNumeric = isNumeric
             };
 
             CacheFn = typeof(T) == typeof(object)
@@ -205,33 +197,23 @@ namespace ServiceStack.Text.Json
 
         public static void WriteObject(TextWriter writer, object value)
         {
-#if __IOS__
-			if (writer == null) return;
-#endif
             TypeConfig<T>.Init();
 
             try
             {
-                if (++JsState.Depth > JsConfig.MaxDepth)
-                {
-                    Tracer.Instance.WriteError("Exceeded MaxDepth limit of {0} attempting to serialize {1}"
-                        .Fmt(JsConfig.MaxDepth, value.GetType().Name));
+                if (!JsState.Traverse(value))
                     return;
-                }
 
                 CacheFn(writer, value);
             }
             finally
             {
-                JsState.Depth--;
+                JsState.UnTraverse();
             }
         }
 
         public static void WriteRootObject(TextWriter writer, object value)
         {
-#if __IOS__
-			if (writer == null) return;
-#endif
             TypeConfig<T>.Init();
 
             JsState.Depth = 0;

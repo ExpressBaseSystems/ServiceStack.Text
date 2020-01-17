@@ -1,4 +1,8 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Runtime.Serialization;
+using System.Threading;
 using NUnit.Framework;
 
 namespace ServiceStack.Text.Tests.JsonTests
@@ -35,16 +39,52 @@ namespace ServiceStack.Text.Tests.JsonTests
         [Test]
         public void Can_serialize_null_JsonObject_response()
         {
-            JsConfig.ThrowOnDeserializationError = true;
+            JsConfig.ThrowOnError = true;
             var json = "{\"result\":null}";
             var dto = json.FromJson<JsonObjectResponse>();
             Assert.That(dto.result, Is.Null);
-            JsConfig.ThrowOnDeserializationError = false;
+            JsConfig.ThrowOnError = false;
         }
 
         [Test]
         public void Can_Serialize_numbers()
         {
+            var culture = new CultureInfo("en-US");
+            Thread.CurrentThread.CurrentCulture = culture;
+            Thread.CurrentThread.CurrentUICulture = culture;
+
+            string notNumber = "{\"field\":\"00001\"}";
+            Assert.That(JsonObject.Parse(notNumber).ToJson(), Is.EqualTo(notNumber));
+
+            string num1 = "{\"field\":0}";
+            Assert.That(JsonObject.Parse(num1).ToJson(), Is.EqualTo(num1));
+
+            string num2 = "{\"field\":0.5}";
+            Assert.That(JsonObject.Parse(num2).ToJson(), Is.EqualTo(num2));
+
+            string num3 = "{\"field\":.5}";
+            Assert.That(JsonObject.Parse(num3).ToJson(), Is.EqualTo(num3));
+
+            string num4 = "{\"field\":12312}";
+            Assert.That(JsonObject.Parse(num4).ToJson(), Is.EqualTo(num4));
+
+            string num5 = "{\"field\":12312.1231}";
+            Assert.That(JsonObject.Parse(num5).ToJson(), Is.EqualTo(num5));
+
+            string num6 = "{\"field\":1435252569117}";
+            Assert.That(JsonObject.Parse(num6).ToJson(), Is.EqualTo(num6));
+
+            string num7 = "{\"field\":1435052569117}";
+            Assert.That(JsonObject.Parse(num7).ToJson(), Is.EqualTo(num7));
+        }
+
+        [Test]
+        public void Can_Serialize_numbers_DifferentCulture()
+        {
+            var culture = new CultureInfo("sl-SI");
+            Thread.CurrentThread.CurrentCulture = culture;
+            Thread.CurrentThread.CurrentUICulture = culture;
+
             string notNumber = "{\"field\":\"00001\"}";
             Assert.That(JsonObject.Parse(notNumber).ToJson(), Is.EqualTo(notNumber));
 
@@ -401,6 +441,145 @@ namespace ServiceStack.Text.Tests.JsonTests
             public string ElementId { get; set; }
             public string Action { get; set; }
             // There can be more nested objects in here
+        }
+
+        
+        public class CreateEvent
+        {
+            public EventContent Event { get; set; }
+        }
+
+        public class EventContent
+        {
+            public JsonObject EventPayLoad { get; set; }
+            public object EventObject { get; set; }
+        }
+
+        public class EventPayLoadPosition
+        {
+            public double? Heading { get; set; }
+
+            public double? Accuracy { get; set; }
+
+            public double? Speed { get; set; }
+        }
+
+        [Test]
+        public void Can_deserialize_custom_JsonObject_payload()
+        {
+            var json = "{\"Event\":{\"EventPayload\":{\"Heading\":1.1}}}";
+            var dto = json.FromJson<CreateEvent>();
+            
+            Assert.That(dto.Event.EventPayLoad.Get("Heading"), Is.EqualTo("1.1"));
+
+            var payload = dto.Event.EventPayLoad.ConvertTo<EventPayLoadPosition>();
+            Assert.That(payload.Heading, Is.EqualTo(1.1));
+        }
+
+        [Test]
+        public void Can_deserialize_custom_object_payload()
+        {
+            JS.Configure();
+            
+            var json = "{\"Event\":{\"EventObject\":{\"Heading\":1.1}}}";
+            var dto = json.FromJson<CreateEvent>();
+
+            var obj = (Dictionary<string, object>)dto.Event.EventObject;
+
+            var payload = obj.FromObjectDictionary<EventPayLoadPosition>();
+
+            Assert.That(payload.Heading, Is.EqualTo(1.1));
+
+            JS.UnConfigure();
+        }
+
+        [Test]
+        public void Can_deserialize_custom_JsonObject_with_incorrect_payload()
+        {
+            var json = "{\"Event\":{\"EventPayload\":{\"Heading\":24.687999725341797.0}}}";
+            var dto = json.FromJson<CreateEvent>();
+
+            try
+            {
+                var payload = dto.Event.EventPayLoad.ConvertTo<EventPayLoadPosition>();
+                Assert.Fail("Should throw");
+            }
+            catch (FormatException) {}
+        }
+        
+        class HasObjectDictionary
+        {
+            public Dictionary<string, object> Properties { get; set; }
+        }
+
+        [Test]
+        public void Can_deserialize_unknown_ObjectDictionary()
+        {
+            JS.Configure();
+
+            Assert.That("{\"Properties\":{\"a\":1}}".FromJson<HasObjectDictionary>().Properties["a"], Is.EqualTo(1));
+            Assert.That("{\"Properties\":{\"a\":\"1\"}}".FromJson<HasObjectDictionary>().Properties["a"], Is.EqualTo("1"));
+            Assert.That("{\"Properties\":{\"a\":[\"1\",\"2\"]}}".FromJson<HasObjectDictionary>().Properties["a"], Is.EquivalentTo(new[]{"1","2"}));
+            Assert.That("{\"Properties\":{\"a\":[1,2]}}".FromJson<HasObjectDictionary>().Properties["a"], Is.EquivalentTo(new[]{1,2}));
+
+            JS.UnConfigure();
+        }
+
+        class HasObjectList
+        {
+            public List<object> Properties { get; set; }
+        }
+
+        [Test]
+        public void Can_deserialize_unknown_ObjectList()
+        {
+            JS.Configure();
+
+            Assert.That("{\"Properties\":[\"1\"]}".FromJson<HasObjectList>().Properties[0], Is.EqualTo("1"));
+            Assert.That("{\"Properties\":[1]}".FromJson<HasObjectList>().Properties[0], Is.EqualTo(1));
+            Assert.That("{\"Properties\":[[\"1\",\"2\"]]}".FromJson<HasObjectList>().Properties[0], Is.EquivalentTo(new[]{"1","2"}));
+            Assert.That("{\"Properties\":[[1,2]]}".FromJson<HasObjectList>().Properties[0], Is.EquivalentTo(new[]{1,2}));
+            Assert.That("{\"Properties\":[{\"a\":1}]".FromJson<HasObjectList>().Properties[0], Is.EquivalentTo(new Dictionary<string,object> {
+                ["a"] = 1
+            }));
+
+            JS.UnConfigure();
+        }
+
+        [DataContract]
+        public class BrowseProtocolTemplateResponseLight
+        {
+            [DataMember(Name = "ProtocolTemplateId")]
+            public Guid Oid { get; set; }
+
+            [DataMember]
+            public string Name { get; set; }
+
+            [DataMember]
+            public string Title { get; set; }
+
+            [DataMember]
+            public string Description { get; set; }
+
+            [DataMember]
+            public List<object> ProtocolBusinessObjects { get; set; }
+
+            [DataMember]
+            public ResponseStatus ResponseStatus { get; set; }
+        }
+
+        [Test]
+        public void Can_deserialize_JSV_List_object_when_ObjectDeserializer_is_configured()
+        {
+            JS.Configure();
+
+            var json = @"{ ProtocolTemplateId:d7f0aa3afd834e90aaa9a97b7efd0c03,Name: Rendezvényszervezés,Title: Test,Description: Rendezvényszervezés,ProtocolBusinessObjects:[[{ Oid: 3c229e70345f11e9bf726dd67bf32ebd,ObjectType: AwaitObject,Flags: 18,Name: AwaitObject1,Title: AwaitObject1,SecondaryTitle: AwaitObject1,Description: "",OwnerType: 1,Owner: { UserId: 2,DisplayName: System},DeadlineType: 2,DeadlineOffsetDays: 1,Priority: 2,PriorityToData: False,DeadlineToData: False,CompletedDateToData: False,OwnerToData: False,Visible: False,ProtocolTemplateId: d7f0aa3afd834e90aaa9a97b7efd0c03,ProtocolTemplateGroupId: e44dfc5da20942fe8532d6446ef0b76c,CreatedBy: { UserId: 4,DisplayName: Wiszt Máté},CreatedDateTime: 2019 - 03 - 21T15: 05:41.0929542 + 01:00}]]}";
+
+            var ret = json.FromJsv<BrowseProtocolTemplateResponseLight>();
+            
+            Assert.That(ret.ProtocolBusinessObjects.Count, Is.GreaterThan(0));
+
+            JS.UnConfigure();
         }
 
     }

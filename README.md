@@ -1,7 +1,6 @@
-Follow [@ServiceStack](https://twitter.com/servicestack) or join the [Google+ Community](https://plus.google.com/communities/112445368900682590445)
-for updates, or [StackOverflow](http://stackoverflow.com/questions/ask) or the [Customer Forums](https://forums.servicestack.net/) for support.
+Follow [@ServiceStack](https://twitter.com/servicestack) or [view the docs](https://docs.servicestack.net), use [StackOverflow](http://stackoverflow.com/questions/ask) or the [Customer Forums](https://forums.servicestack.net/) for support.
 
-## FREE high-perf Text Serializers and Core Utils powering [servicestack.net](https://servicestack.net)
+## [FREE high-perf Text Serializers](https://docs.servicestack.net/releases/v4.0.62#servicestacktext-is-now-free) and Core Utils powering [servicestack.net](https://servicestack.net)
 
 ServiceStack.Text is an **independent, dependency-free** serialization library containing ServiceStack's core high-performance utils and text processing functionality, including:
 
@@ -154,36 +153,37 @@ project. It provides a dynamic, but more succinct API than the above options.
 ### JS Utils
 
 ServiceStack.Text APIs for deserializing arbitrary JSON requires specifying the the Type to deserialize into. An alternative flexible approach to read any arbitrary JavaScript or JSON data structures is to use the high-performance and memory efficient JSON utils in 
-[ServiceStack Templates](http://templates.servicestack.net) implementation of JavaScript.
+[#Script](https://sharpscript.net/) implementation of JavaScript.
 
 ```csharp
-JSON.parse("1")      //= int 1 
-JSON.parse("1.1")    //= double 1.1
-JSON.parse("'a'")    //= string "a"
-JSON.parse("{a:1}")  //= new Dictionary<string, object> { {"a", 1 } }
+JSON.parse("1")       //= int 1 
+JSON.parse("1.1")     //= double 1.1
+JSON.parse("'a'")     //= string "a"
+JSON.parse("{a:1}")   //= new Dictionary<string, object> { {"a", 1 } }
+JSON.parse("[{a:1}]") //= new List<object> { new Dictionary<string, object> { { "a", 1 } } }
 ```
 
 #### Eval
 
-Since JS Utils is an essential part of [ServiceStack Template language](http://templates.servicestack.net) it allows for advanced scenarios like implementing a text DSL or scripting language for executing custom logic or business rules you want to be able to change without having to compile or redeploy your App. It uses [Templates Sandbox](http://templates.servicestack.net/docs/sandbox) which lets you evaluate the script within a custom scope that defines what functions 
+Since JS Utils is an essential part of [#Script](https://sharpscript.net/) it allows for advanced scenarios like implementing a text DSL or scripting language for executing custom logic or business rules you want to be able to change without having to compile or redeploy your App. It uses [#Script Context](https://sharpscript.net/docs/methods) which lets you evaluate the script within a custom scope that defines what functions 
 and arguments it has access to, e.g:
 
 ```csharp
-public class CustomFilter : TemplateFilter
+public class CustomMethods : ScriptMethods
 {
     public string reverse(string text) => new string(text.Reverse().ToArray());
 }
 
 var scope = JS.CreateScope(
          args: new Dictionary<string, object> { { "arg", "value"} }, 
-    functions: new CustomFilter());
+    functions: new CustomMethods());
 
 JS.eval("arg", scope)                                        //= "value"
 JS.eval("reverse(arg)", scope)                               //= "eulav"
-JS.eval("itemsOf(3, padRight(reverse(arg), 8, '_'))", scope) //= ["eulav___", "eulav___", "eulav___"]
+JS.eval("3.itemsOf(arg.reverse().padRight(8, '_'))", scope) //= ["eulav___", "eulav___", "eulav___"]
 
 //= { a: ["eulav___", "eulav___", "eulav___"] }
-JS.eval("{a: itemsOf(3, padRight(reverse(arg), 8, '_')) }", scope)
+JS.eval("{a: 3.itemsOf(arg.reverse().padRight(8, '_')) }", scope)
 ```
 
 ServiceStack's JS Utils is available in the [ServiceStack.Common](https://www.nuget.org/packages/ServiceStack.Common) NuGet package.
@@ -317,7 +317,7 @@ All C# boolean and numeric data types are stored as-is without quotes.
 For the most compact output null values are omitted from the serialized by default. If you want to include null values set the global configuration:
 
 ```csharp
-JsConfig.IncludeNullValues = true;
+JsConfig.Init(new Config { IncludeNullValues = true });
 ```
 
 ### string type
@@ -360,11 +360,15 @@ JsonSerializer also supports serialization of anonymous types in much the same w
 
 ## Global Default JSON Configuration
 
-The JSON/JSV and CSV serialization can be customized globally by configuring the `JsConfig` or type-specific `JsConfig<T>` static classes with your preferred defaults, e.g:
+The JSON/JSV and CSV serialization can be customized globally by configuring the `JsConfig` or type-specific `JsConfig<T>` static classes with your preferred defaults. Global static configuration can be configured once on **Startup** using `JsConfig.Init()`, e.g:
 
 ```csharp
-JsConfig.EmitLowercaseUnderscoreNames = true; 
-JsConfig.ExcludeDefaultValues = true;
+JsConfig.Init(new Config {
+    DateHandler = DateHandler.ISO8601,
+    AlwaysUseUtc = true,
+    TextCase = TextCase.CamelCase,
+    ExcludeDefaultValues = true,                
+});
 ```
 
 The following is a list of `bool` options you can use to configure many popular preferences:
@@ -373,8 +377,6 @@ The following is a list of `bool` options you can use to configure many popular 
     <thead>
         <tr><th>Name</th><th>Alias</th></tr>
     </thead>
-    <tr><td>EmitCamelCaseNames</td><td>eccn</td></tr>
-    <tr><td>EmitLowercaseUnderscoreNames</td><td>elun</td></tr>
     <tr><td>IncludeNullValues</td><td>inv</td></tr>
     <tr><td>IncludeNullValuesInDictionaries</td><td>invid</td></tr>
     <tr><td>IncludeDefaultEnums</td><td>ide</td></tr>
@@ -396,6 +398,8 @@ The following is a list of `bool` options you can use to configure many popular 
     <tr><td>AppendUtcOffset</td><td>auo</td></tr>
     <tr><td>EscapeHtmlChars</td><td>ehc</td></tr>
     <tr><td>EscapeUnicode</td><td>eu</td></tr>
+    <tr><td>EmitCamelCaseNames</td><td>eccn</td></tr>
+    <tr><td>EmitLowercaseUnderscoreNames</td><td>elun</td></tr>
 </table>
 
 ### DateHandler (dh)
@@ -418,6 +422,15 @@ The following is a list of `bool` options you can use to configure many popular 
     <tr><td>StandardFormat</td><td>sf</td></tr>
 </table>
 
+### TextCase (tc)
+
+<table>
+    <tr><td>Default</td><td>d</td></tr>
+    <tr><td>PascalCase</td><td>pc</td></tr>
+    <tr><td>CamelCase</td><td>cc</td></tr>
+    <tr><td>SnakeCase</td><td>sc</td></tr>
+</table>
+
 ### PropertyConvention (pc)
 
 <table>
@@ -427,21 +440,25 @@ The following is a list of `bool` options you can use to configure many popular 
 
 ### Custom Config Scopes
 
-If you need to override the Global JSON Configuration defaults for adhoc JSON serialization you can use a Custom Config Scope, e.g:
+If you need to use different serialization settings from the global static defaults you can use `JsConfig.With()` to create a scoped configuration
+using property initializers:
 
 ```csharp
-using (JsConfig.With(emitCamelCaseNames:true, excludeDefaultValues:true))
+using (JsConfig.With(new Config { 
+    TextCase == TextCase.CamelCase, 
+    PropertyConvention = PropertyConvention.Lenient
+}))
 {
-    var json = dto.ToJson();
+    return text.FromJson<T>();
 }
 ```
 
 #### Create Custom Scopes using String config
 
-You can also create a custion config scope from a string manually using `JsConfig.CreateScope()` where you can use the full config name or their aliases, e.g:
+You can also create a custom config scope from a string manually using `JsConfig.CreateScope()` where you can use the full config name or their aliases, e.g:
 
 ```csharp
-using (JsConfig.CreateScope("EmitLowercaseUnderscoreNames,EDV,dh:ut")) 
+using (JsConfig.CreateScope("IncludeNullValues,EDV,dh:ut")) 
 {
     var json = dto.ToJson();
 }
@@ -462,6 +479,16 @@ JsConfig<Guid>.SerializeFn = guid => guid.ToString("D");
 JsConfig<TimeSpan>.SerializeFn = time => 
     (time.Ticks < 0 ? "-" : "") + time.ToString("hh':'mm':'ss'.'fffffff");
 ```
+
+## Strict Parsing
+
+By default ServiceStack Serializers will try to deserialize as much as possible without error, if you prefer you can opt-in to stricter parsing with:
+
+```csharp
+Env.StrictMode = true;
+```
+
+Where it will instead fail fast and throw Exceptions on deserialization errors.
 
 ## Custom Serialization
 
@@ -634,6 +661,42 @@ If you’re in a trusted intranet environment this can also be used to disable t
 
 ```csharp
 JsConfig.AllowRuntimeType = _ => true;
+```
+
+### Custom Enum Serialization
+
+You can use `[EnumMember]` to change what Enum value gets serialized, e.g:
+
+```csharp
+[DataContract]
+public enum Day
+{
+    [EnumMember(Value = "MON")]
+    Monday,
+    [EnumMember(Value = "TUE")]
+    Tuesday,
+    [EnumMember(Value = "WED")]
+    Wednesday,
+    [EnumMember(Value = "THU")]
+    Thursday,
+    [EnumMember(Value = "FRI")]
+    Friday,
+    [EnumMember(Value = "SAT")]
+    Saturday,
+    [EnumMember(Value = "SUN")]
+    Sunday,            
+}
+
+class EnumMemberDto
+{
+    public Day Day { get; set; }
+}
+
+var dto = new EnumMemberDto {Day = Day.Sunday};
+var json = dto.ToJson();  //= {"Day":"SUN"}
+
+var fromDto = json.FromJson<EnumMemberDto>();
+fromDto.Day               //= Day.Sunday
 ```
 
 ## TypeSerializer Details (JSV Format)

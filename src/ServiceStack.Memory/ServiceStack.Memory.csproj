@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netcoreapp2.1</TargetFrameworks>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'netcoreapp2.1' ">
+    <DefineConstants>$(DefineConstants);NETSTANDARD;NETCORE2_1</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ServiceStack.Text\ServiceStack.Text.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\ServiceStack.Text\NetCoreMemory.cs">
+      <Link>NetCoreMemory.cs</Link>
+    </Compile>
+  </ItemGroup>
+</Project>

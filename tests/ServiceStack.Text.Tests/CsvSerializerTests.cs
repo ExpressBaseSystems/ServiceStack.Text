@@ -1,7 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Threading;
 using Northwind.Common.DataModel;
 using NUnit.Framework;
 using ServiceStack.Text.Tests.Support;
@@ -114,7 +116,7 @@ namespace ServiceStack.Text.Tests
         }
 
         [Test]
-        public void Does_parse_fileds_with_unmatchedJsMark()
+        public void Does_parse_fields_with_unmatchedJsMark()
         {
             Assert.That(CsvReader.ParseFields("{A,B"), Is.EqualTo(new[] { "{A", "B" }));
             Assert.That(CsvReader.ParseFields("{A},B"), Is.EqualTo(new[] { "{A}", "B" }));
@@ -219,7 +221,7 @@ namespace ServiceStack.Text.Tests
             Assert.That(map["Id"], Is.EqualTo(movie.Id.ToString()));
             Assert.That(map["ImdbId"], Is.EqualTo(movie.ImdbId));
             Assert.That(map["Title"], Is.EqualTo(movie.Title));
-            Assert.That(map["Rating"], Is.EqualTo(movie.Rating.ToString()));
+            Assert.That(map["Rating"], Is.EqualTo(movie.Rating.ToString(CultureInfo.InvariantCulture)));
             Assert.That(map["Director"], Is.EqualTo(movie.Director));
             Assert.That(map["ReleaseDate"], Is.EqualTo(movie.ReleaseDate.ToJsv()));
             Assert.That(map["TagLine"], Is.EqualTo(movie.TagLine));
@@ -252,7 +254,7 @@ namespace ServiceStack.Text.Tests
             Assert.That(first[0], Is.EqualTo(movie.Id.ToString()));
             Assert.That(first[1], Is.EqualTo(movie.ImdbId));
             Assert.That(first[2], Is.EqualTo(movie.Title));
-            Assert.That(first[3], Is.EqualTo(movie.Rating.ToString()));
+            Assert.That(first[3], Is.EqualTo(movie.Rating.ToString(CultureInfo.InvariantCulture)));
             Assert.That(first[4], Is.EqualTo(movie.Director));
             Assert.That(first[5], Is.EqualTo(movie.ReleaseDate.ToJsv()));
             Assert.That(first[6], Is.EqualTo(movie.TagLine));
@@ -373,6 +375,20 @@ namespace ServiceStack.Text.Tests
             };
 
             Assert.That(kvps.ToCsv().NormalizeNewLines(), Is.EqualTo("Id,CustomerId\n1,ALFKI").Or.EqualTo("CustomerId,Id\nALFKI,1"));
+        }
+
+        [Test]
+        public void Can_serialize_fields_with_double_quotes()
+        {
+            var person = new Person { Id = 1, Name = "\"Mr. Lee\"" };
+            Assert.That(person.ToCsv().NormalizeNewLines(), Is.EqualTo("Id,Name\n1,\"\"\"Mr. Lee\"\"\""));
+            var fromCsv = person.ToCsv().FromCsv<Person>();
+            Assert.That(fromCsv, Is.EqualTo(person));
+            
+            person = new Person { Id = 1, Name = "\"Anon\" Review" };
+            Assert.That(person.ToCsv().NormalizeNewLines(), Is.EqualTo("Id,Name\n1,\"\"\"Anon\"\" Review\""));
+            fromCsv = person.ToCsv().FromCsv<Person>();
+            Assert.That(fromCsv, Is.EqualTo(person));
         }
 
         [Test]

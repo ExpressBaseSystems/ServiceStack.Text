@@ -21,17 +21,22 @@ namespace ServiceStack
 
         public static string AddQueryParam(this string url, string key, object val, bool encode = true)
         {
-            return url.AddQueryParam(key, val.ToString(), encode);
+            return url.AddQueryParam(key, val?.ToString(), encode);
         }
 
         public static string AddQueryParam(this string url, object key, string val, bool encode = true)
         {
-            return AddQueryParam(url, (key ?? "").ToString(), val, encode);
+            return AddQueryParam(url, key?.ToString(), val, encode);
         }
 
         public static string AddQueryParam(this string url, string key, string val, bool encode = true)
         {
-            if (string.IsNullOrEmpty(url)) return null;
+            if (url == null)
+                url = "";
+
+            if (key == null || val == null)
+                return url;
+            
             var prefix = string.Empty;
             if (!url.EndsWith("?") && !url.EndsWith("&"))
             {
@@ -42,13 +47,18 @@ namespace ServiceStack
 
         public static string SetQueryParam(this string url, string key, string val)
         {
-            if (string.IsNullOrEmpty(url)) return null;
+            if (url == null)
+                url = "";
+            
+            if (key == null || val == null)
+                return url;
+            
             var qsPos = url.IndexOf('?');
             if (qsPos != -1)
             {
-                var existingKeyPos = qsPos + 1 == url.IndexOf(key + "=", qsPos, PclExport.Instance.InvariantComparison)
+                var existingKeyPos = qsPos + 1 == url.IndexOf(key + "=", qsPos, StringComparison.Ordinal)
                     ? qsPos
-                    : url.IndexOf("&" + key, qsPos, PclExport.Instance.InvariantComparison);
+                    : url.IndexOf("&" + key, qsPos, StringComparison.Ordinal);
 
                 if (existingKeyPos != -1)
                 {
@@ -69,19 +79,29 @@ namespace ServiceStack
 
         public static string AddHashParam(this string url, string key, object val)
         {
-            return url.AddHashParam(key, val.ToString());
+            return url.AddHashParam(key, val?.ToString());
         }
 
         public static string AddHashParam(this string url, string key, string val)
         {
-            if (string.IsNullOrEmpty(url)) return null;
+            if (url == null)
+                url = "";
+            
+            if (key == null || val == null)
+                return url;
+            
             var prefix = url.IndexOf('#') == -1 ? "#" : "/";
             return url + prefix + key + "=" + val.UrlEncode();
         }
 
         public static string SetHashParam(this string url, string key, string val)
         {
-            if (string.IsNullOrEmpty(url)) return null;
+            if (url == null)
+                url = "";
+            
+            if (key == null || val == null)
+                return url;
+            
             var hPos = url.IndexOf('#');
             if (hPos != -1)
             {
@@ -541,15 +561,13 @@ namespace ServiceStack
 
             using (var webRes = PclExport.Instance.GetResponse(webReq))
             using (var stream = webRes.GetResponseStream())
-            using (var reader = new StreamReader(stream, UseEncoding))
             {
                 responseFilter?.Invoke((HttpWebResponse)webRes);
-
-                return reader.ReadToEnd();
+                return stream.ReadToEnd(UseEncoding);
             }
         }
 
-        public static Task<string> SendStringToUrlAsync(this string url, string method = null, string requestBody = null,
+        public static async Task<string> SendStringToUrlAsync(this string url, string method = null, string requestBody = null,
             string contentType = null, string accept = "*/*", Action<HttpWebRequest> requestFilter = null,
             Action<HttpWebResponse> responseFilter = null)
         {
@@ -567,9 +585,7 @@ namespace ServiceStack
             if (ResultsFilter != null)
             {
                 var result = ResultsFilter.GetString(webReq, requestBody);
-                var tcsResult = new TaskCompletionSource<string>();
-                tcsResult.SetResult(result);
-                return tcsResult.Task;
+                return result;
             }
 
             if (requestBody != null)
@@ -581,33 +597,14 @@ namespace ServiceStack
                 }
             }
 
-            var taskWebRes = webReq.GetResponseAsync();
-            var tcs = new TaskCompletionSource<string>();
-
-            taskWebRes.ContinueWith(task =>
+            using (var webRes = await webReq.GetResponseAsync())
             {
-                if (task.Exception != null)
-                {
-                    tcs.SetException(task.Exception);
-                    return;
-                }
-                if (task.IsCanceled)
-                {
-                    tcs.SetCanceled();
-                    return;
-                }
-
-                var webRes = task.Result;
                 responseFilter?.Invoke((HttpWebResponse)webRes);
-
                 using (var stream = webRes.GetResponseStream())
-                using (var reader = new StreamReader(stream, UseEncoding))
                 {
-                    tcs.SetResult(reader.ReadToEnd());
+                    return await stream.ReadToEndAsync();
                 }
-            });
-
-            return tcs.Task;
+            }
         }
 
         public static byte[] GetBytesFromUrl(this string url, string accept = "*/*",
@@ -694,7 +691,7 @@ namespace ServiceStack
             }
         }
 
-        public static Task<byte[]> SendBytesToUrlAsync(this string url, string method = null,
+        public static async Task<byte[]> SendBytesToUrlAsync(this string url, string method = null,
             byte[] requestBody = null, string contentType = null, string accept = "*/*",
             Action<HttpWebRequest> requestFilter = null, Action<HttpWebResponse> responseFilter = null)
         {
@@ -712,9 +709,7 @@ namespace ServiceStack
             if (ResultsFilter != null)
             {
                 var result = ResultsFilter.GetBytes(webReq, requestBody);
-                var tcsResult = new TaskCompletionSource<byte[]>();
-                tcsResult.SetResult(result);
-                return tcsResult.Task;
+                return result;
             }
 
             if (requestBody != null)
@@ -725,32 +720,134 @@ namespace ServiceStack
                 }
             }
 
-            var taskWebRes = webReq.GetResponseAsync();
-            var tcs = new TaskCompletionSource<byte[]>();
+            var webRes = await webReq.GetResponseAsync();
+            responseFilter?.Invoke((HttpWebResponse)webRes);
 
-            taskWebRes.ContinueWith(task =>
+            using (var stream = webRes.GetResponseStream())
             {
-                if (task.Exception != null)
-                {
-                    tcs.SetException(task.Exception);
-                    return;
-                }
-                if (task.IsCanceled)
-                {
-                    tcs.SetCanceled();
-                    return;
-                }
+                return stream.ReadFully();
+            }
+        }
+        
+        public static Stream GetStreamFromUrl(this string url, string accept = "*/*",
+            Action<HttpWebRequest> requestFilter = null, Action<HttpWebResponse> responseFilter = null)
+        {
+            return url.SendStreamToUrl(accept: accept, requestFilter: requestFilter, responseFilter: responseFilter);
+        }
 
-                var webRes = task.Result;
-                responseFilter?.Invoke((HttpWebResponse)webRes);
+        public static Task<Stream> GetStreamFromUrlAsync(this string url, string accept = "*/*",
+            Action<HttpWebRequest> requestFilter = null, Action<HttpWebResponse> responseFilter = null)
+        {
+            return url.SendStreamToUrlAsync(accept: accept, requestFilter: requestFilter, responseFilter: responseFilter);
+        }
 
-                using (var stream = webRes.GetResponseStream())
+        public static Stream PostStreamToUrl(this string url, Stream requestBody = null, string contentType = null, string accept = "*/*",
+            Action<HttpWebRequest> requestFilter = null, Action<HttpWebResponse> responseFilter = null)
+        {
+            return SendStreamToUrl(url, method: "POST",
+                contentType: contentType, requestBody: requestBody,
+                accept: accept, requestFilter: requestFilter, responseFilter: responseFilter);
+        }
+
+        public static Task<Stream> PostStreamToUrlAsync(this string url, Stream requestBody = null, string contentType = null, string accept = "*/*",
+            Action<HttpWebRequest> requestFilter = null, Action<HttpWebResponse> responseFilter = null)
+        {
+            return SendStreamToUrlAsync(url, method: "POST",
+                contentType: contentType, requestBody: requestBody,
+                accept: accept, requestFilter: requestFilter, responseFilter: responseFilter);
+        }
+
+        public static Stream PutStreamToUrl(this string url, Stream requestBody = null, string contentType = null, string accept = "*/*",
+            Action<HttpWebRequest> requestFilter = null, Action<HttpWebResponse> responseFilter = null)
+        {
+            return SendStreamToUrl(url, method: "PUT",
+                contentType: contentType, requestBody: requestBody,
+                accept: accept, requestFilter: requestFilter, responseFilter: responseFilter);
+        }
+
+        public static Task<Stream> PutStreamToUrlAsync(this string url, Stream requestBody = null, string contentType = null, string accept = "*/*",
+            Action<HttpWebRequest> requestFilter = null, Action<HttpWebResponse> responseFilter = null)
+        {
+            return SendStreamToUrlAsync(url, method: "PUT",
+                contentType: contentType, requestBody: requestBody,
+                accept: accept, requestFilter: requestFilter, responseFilter: responseFilter);
+        }
+
+        /// <summary>
+        /// Returns HttpWebResponse Stream which must be disposed
+        /// </summary>
+        public static Stream SendStreamToUrl(this string url, string method = null,
+            Stream requestBody = null, string contentType = null, string accept = "*/*",
+            Action<HttpWebRequest> requestFilter = null, Action<HttpWebResponse> responseFilter = null)
+        {
+            var webReq = (HttpWebRequest)WebRequest.Create(url);
+            if (method != null)
+                webReq.Method = method;
+
+            if (contentType != null)
+                webReq.ContentType = contentType;
+
+            webReq.Accept = accept;
+            PclExport.Instance.AddCompression(webReq);
+
+            requestFilter?.Invoke(webReq);
+
+            if (ResultsFilter != null)
+            {
+                return new MemoryStream(ResultsFilter.GetBytes(webReq, requestBody.ReadFully()));
+            }
+
+            if (requestBody != null)
+            {
+                using (var req = PclExport.Instance.GetRequestStream(webReq))
                 {
-                    tcs.SetResult(stream.ReadFully());
+                    requestBody.CopyTo(req);
                 }
-            });
+            }
 
-            return tcs.Task;
+            var webRes = PclExport.Instance.GetResponse(webReq);
+            responseFilter?.Invoke((HttpWebResponse)webRes);
+
+            var stream = webRes.GetResponseStream();
+            return stream;
+        }
+
+        /// <summary>
+        /// Returns HttpWebResponse Stream which must be disposed
+        /// </summary>
+        public static async Task<Stream> SendStreamToUrlAsync(this string url, string method = null,
+            Stream requestBody = null, string contentType = null, string accept = "*/*",
+            Action<HttpWebRequest> requestFilter = null, Action<HttpWebResponse> responseFilter = null)
+        {
+            var webReq = (HttpWebRequest)WebRequest.Create(url);
+            if (method != null)
+                webReq.Method = method;
+            if (contentType != null)
+                webReq.ContentType = contentType;
+
+            webReq.Accept = accept;
+            PclExport.Instance.AddCompression(webReq);
+
+            requestFilter?.Invoke(webReq);
+
+            if (ResultsFilter != null)
+            {
+                return new MemoryStream(ResultsFilter.GetBytes(webReq, requestBody.ReadFully()));
+            }
+
+            if (requestBody != null)
+            {
+                using (var req = PclExport.Instance.GetRequestStream(webReq))
+                {
+                    await requestBody.CopyToAsync(req);
+                }
+            }
+
+            var webRes = await webReq.GetResponseAsync();
+            responseFilter?.Invoke((HttpWebResponse)webRes);
+
+            var stream = webRes.GetResponseStream();
+            return stream;
         }
 
         public static bool IsAny300(this Exception ex)
@@ -849,25 +946,21 @@ namespace ServiceStack
                 return null;
 
             var errorResponse = (HttpWebResponse)webEx.Response;
-            using (var reader = new StreamReader(errorResponse.GetResponseStream(), UseEncoding))
-            {
-                return reader.ReadToEnd();
-            }
+            return errorResponse.GetResponseStream().ReadToEnd(UseEncoding);
         }
 
         public static string ReadToEnd(this WebResponse webRes)
         {
             using (var stream = webRes.GetResponseStream())
-            using (var reader = new StreamReader(stream, UseEncoding))
             {
-                return reader.ReadToEnd();
+                return stream.ReadToEnd(UseEncoding);
             }
         }
 
         public static IEnumerable<string> ReadLines(this WebResponse webRes)
         {
             using (var stream = webRes.GetResponseStream())
-            using (var reader = new StreamReader(stream, UseEncoding))
+            using (var reader = new StreamReader(stream, UseEncoding, true, 1024, leaveOpen:true))
             {
                 string line;
                 while ((line = reader.ReadLine()) != null)
@@ -1120,8 +1213,11 @@ namespace ServiceStack
     public static class MimeTypes
     {
         public static Dictionary<string, string> ExtensionMimeTypes = new Dictionary<string, string>();
+        public const string Utf8Suffix = "; charset=utf-8";
 
         public const string Html = "text/html";
+        public const string HtmlUtf8 = Html + Utf8Suffix;
+        public const string Css = "text/css";
         public const string Xml = "application/xml";
         public const string XmlText = "text/xml";
         public const string Json = "application/json";
@@ -1131,6 +1227,7 @@ namespace ServiceStack
         public const string Csv = "text/csv";
         public const string ProtoBuf = "application/x-protobuf";
         public const string JavaScript = "text/javascript";
+        public const string WebAssembly = "application/wasm";
 
         public const string FormUrlEncoded = "application/x-www-form-urlencoded";
         public const string MultiPartFormData = "multipart/form-data";
@@ -1143,7 +1240,11 @@ namespace ServiceStack
         public const string MarkdownText = "text/markdown";
         public const string MsgPack = "application/x-msgpack";
         public const string Wire = "application/x-wire";
+        public const string Compressed = "application/x-compressed";
         public const string NetSerializer = "application/x-netserializer";
+        public const string Excel = "application/excel";
+        public const string MsWord = "application/msword";
+        public const string Cert = "application/x-x509-ca-cert";
 
         public const string ImagePng = "image/png";
         public const string ImageGif = "image/gif";
@@ -1168,17 +1269,125 @@ namespace ServiceStack
 
             throw new NotSupportedException("Unknown mimeType: " + mimeType);
         }
+        
+        //lowercases and trims left part of content-type prior ';'
+        public static string GetRealContentType(string contentType)
+        {
+            if (contentType == null)
+                return null;
+
+            int start = -1, end = -1;
+
+            for(int i=0; i < contentType.Length; i++)
+            {
+                if (!char.IsWhiteSpace(contentType[i]))
+                {
+                    if (contentType[i] == ';')
+                        break;
+                    if (start == -1)
+                    {
+                        start = i;
+                    }
+                    end = i;
+                }
+            }
+
+            return start != -1 
+                    ? contentType.Substring(start, end - start + 1).ToLowerInvariant()
+                    :  null;
+        }
+
+        //Compares two string from start to ';' char, case-insensitive,
+        //ignoring (trimming) spaces at start and end
+        public static bool MatchesContentType(string contentType, string matchesContentType)
+        {
+            if (contentType == null || matchesContentType == null)
+                return false;
+            
+            int start = -1, matchStart = -1, matchEnd = -1;
+
+            for (var i=0; i < contentType.Length; i++)
+            {
+                if (char.IsWhiteSpace(contentType[i])) 
+                    continue;
+                start = i;
+                break;
+            }
+
+            for (var i=0; i < matchesContentType.Length; i++)
+            {
+                if (char.IsWhiteSpace(matchesContentType[i])) 
+                    continue;
+                if (matchesContentType[i] == ';')
+                    break;
+                if (matchStart == -1)
+                    matchStart = i;
+                matchEnd = i;
+            }
+            
+            return start != -1 && matchStart != -1 && matchEnd != -1
+                  && string.Compare(contentType, start,
+                        matchesContentType, matchStart, matchEnd - matchStart + 1,
+                        StringComparison.OrdinalIgnoreCase) == 0;
+        }
+        
+        public static Func<string, bool?> IsBinaryFilter { get; set; }
+
+        public static bool IsBinary(string contentType)
+        {
+            var userFilter = IsBinaryFilter?.Invoke(contentType);
+            if (userFilter != null)
+                return userFilter.Value;
+            
+            var realContentType = GetRealContentType(contentType);
+            switch (realContentType)
+            {
+                case ProtoBuf:
+                case MsgPack:
+                case Binary:
+                case Bson:
+                case Wire:
+                case Cert:
+                case Excel:
+                case MsWord:
+                case Compressed:
+                case WebAssembly:
+                    return true;
+            }
+
+            // Text format exceptions to below heuristics
+            switch (realContentType)
+            {
+                case ImageSvg:
+                    return false;
+            }
+
+            var primaryType = realContentType.LeftPart('/');
+            var secondaryType = realContentType.RightPart('/');
+            switch (primaryType)
+            {
+                case "image":
+                case "audio":
+                case "video":
+                    return true;
+            }
+
+            if (secondaryType.StartsWith("pkc")
+                || secondaryType.StartsWith("x-pkc")
+                || secondaryType.StartsWith("font")
+                || secondaryType.StartsWith("vnd.ms-"))
+                return true;
+
+            return false;
+        }
 
         public static string GetMimeType(string fileNameOrExt)
         {
             if (string.IsNullOrEmpty(fileNameOrExt))
-                throw new ArgumentNullException("fileNameOrExt");
+                throw new ArgumentNullException(nameof(fileNameOrExt));
 
-            var parts = fileNameOrExt.Split('.');
-            var fileExt = parts[parts.Length - 1];
-
-            string mimeType;
-            if (ExtensionMimeTypes.TryGetValue(fileExt, out mimeType))
+            var fileExt = fileNameOrExt.LastRightPart('.');
+            if (ExtensionMimeTypes.TryGetValue(fileExt, out var mimeType))
             {
                 return mimeType;
             }
@@ -1200,7 +1409,10 @@ namespace ServiceStack
                     return "image/tiff";
 
                 case "svg":
-                    return "image/svg+xml";
+                    return ImageSvg;
+                
+                case "ico":
+                    return "image/x-icon";
 
                 case "htm":
                 case "html":
@@ -1217,21 +1429,33 @@ namespace ServiceStack
                     return "text/jsx";
 
                 case "csv":
+                    return Csv;
                 case "css":
+                    return Css;
+                    
                 case "sgml":
                     return "text/" + fileExt;
 
                 case "txt":
                     return "text/plain";
 
-                case "wav":
-                    return "audio/wav";
-
                 case "mp3":
                     return "audio/mpeg3";
 
+                case "au":
+                case "snd":
+                    return "audio/basic";
+                
+                case "aac":
+                case "ac3":
+                case "aiff":
+                case "m4a":
+                case "m4b":
+                case "m4p":
                 case "mid":
-                    return "audio/midi";
+                case "midi":
+                case "wav":
+                    return "audio/" + fileExt;
 
                 case "qt":
                 case "mov":
@@ -1240,30 +1464,85 @@ namespace ServiceStack
                 case "mpg":
                     return "video/mpeg";
 
-                case "avi":
-                case "mp4":
-                case "ogg":
-                case "webm":
-                    return "video/" + fileExt;
-
                 case "ogv":
                     return "video/ogg";
+
+                case "3gpp":
+                case "avi":
+                case "dv":
+                case "divx":
+                case "ogg":
+                case "mp4":
+                case "webm":
+                    return "video/" + fileExt;
 
                 case "rtf":
                     return "application/" + fileExt;
 
                 case "xls":
-                    return "application/x-excel";
+                case "xlt":
+                case "xla":
+                    return Excel;
+
+                case "xlsx":
+                    return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                case "xltx":
+                    return "application/vnd.openxmlformats-officedocument.spreadsheetml.template";
 
                 case "doc":
-                    return "application/msword";
+                case "dot":
+                    return MsWord;
+
+                case "docx":
+                    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                case "dotx":
+                    return "application/vnd.openxmlformats-officedocument.wordprocessingml.template";
 
                 case "ppt":
-                    return "application/powerpoint";
+                case "oit":
+                case "pps":
+                case "ppa":
+                    return "application/vnd.ms-powerpoint";
 
+                case "pptx":
+                    return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+                case "potx":
+                    return "application/vnd.openxmlformats-officedocument.presentationml.template";
+                case "ppsx":
+                    return "application/vnd.openxmlformats-officedocument.presentationml.slideshow";
+
+                case "mdb":
+                    return "application/vnd.ms-access";
+                
+                case "cer":
+                case "crt":
+                case "der":
+                    return Cert;
+
+                case "p10":
+                    return "application/pkcs10";
+                case "p12":
+                    return "application/x-pkcs12";
+                case "p7b":
+                case "spc":
+                    return "application/x-pkcs7-certificates";
+                case "p7c":
+                case "p7m":
+                    return "application/pkcs7-mime";
+                case "p7r":
+                    return "application/x-pkcs7-certreqresp";
+                case "p7s":
+                    return "application/pkcs7-signature";
+                case "sst":
+                    return "application/vnd.ms-pki.certstore";
+                
                 case "gz":
                 case "tgz":
-                    return "application/x-compressed";
+                case "zip":
+                case "rar":
+                case "lzh":
+                case "z":
+                    return Compressed;
 
                 case "eot":
                     return "application/vnd.ms-fontobject";
@@ -1275,6 +1554,48 @@ namespace ServiceStack
                     return "application/font-woff";
                 case "woff2":
                     return "application/font-woff2";
+                    
+                case "aaf":
+                case "aca":
+                case "asd":
+                case "bin":
+                case "cab":
+                case "chm":
+                case "class":
+                case "cur":
+                case "db":
+                case "dat":
+                case "deploy":
+                case "dll":
+                case "dsp":
+                case "exe":
+                case "fla":
+                case "ics":
+                case "inf":
+                case "java":
+                case "mix":
+                case "msi":
+                case "mso":
+                case "obj":
+                case "ocx":
+                case "prm":
+                case "prx":
+                case "psd":
+                case "psp":
+                case "qxd":
+                case "sea":
+                case "snp":
+                case "so":
+                case "sqlite":
+                case "toc":
+                case "u32":
+                case "xmp":
+                case "xsn":
+                case "xtp":
+                    return Binary;
+                    
+                case "wasm":
+                    return WebAssembly;
 
                 default:
                     return "application/" + fileExt;
@@ -1308,6 +1629,8 @@ namespace ServiceStack
 
         public const string XStatus = "X-Status";
 
+        public const string XPoweredBy = "X-Powered-By";
+        
         public const string Referer = "Referer";
 
         public const string CacheControl = "Cache-Control";

@@ -25,6 +25,7 @@ namespace ServiceStack.Text.Tests.JsonTests
             public bool Boolean { get; set; }
             public DateTime DateTime { get; set; }
             public string NullString { get; set; }
+            public string EmptyString { get; set; }
 
             public static JsonPrimitives Create(int i)
             {
@@ -53,11 +54,6 @@ namespace ServiceStack.Text.Tests.JsonTests
         [SetUp]
         public void Setup()
         {
-#if IOS
-			JsConfig.Reset();
-			JsConfig.RegisterTypeForAot<ExampleEnumWithoutFlagsAttribute>();
-			JsConfig.RegisterTypeForAot<ExampleEnum>();
-#endif
         }
 
         [TearDown]
@@ -135,6 +131,12 @@ namespace ServiceStack.Text.Tests.JsonTests
                 Is.EqualTo(new string[] { "abc", null, "cde", null }));
         }
 
+        [Test]
+        public void Can_parse_mixed_enumarable_empty_strings()
+        {
+            Assert.That(JsonSerializer.DeserializeFromString<IEnumerable<string>>("[\"abc\",\"\",\"cde\",\"\"]"),
+                Is.EqualTo(new string[] { "abc", "", "cde", "" }));
+        }
 
         [Test]
         public void Can_handle_json_primitives()
@@ -149,11 +151,12 @@ namespace ServiceStack.Text.Tests.JsonTests
         [Test]
         public void Can_parse_json_with_nulls()
         {
-            const string json = "{\"Int\":1,\"NullString\":null}";
+            const string json = "{\"Int\":1,\"NullString\":null,\"EmptyString\":\"\"}";
             var value = JsonSerializer.DeserializeFromString<JsonPrimitives>(json);
 
             Assert.That(value.Int, Is.EqualTo(1));
             Assert.That(value.NullString, Is.Null);
+            Assert.That(value.EmptyString, Is.EqualTo(""));
         }
 
         [Test]
@@ -579,7 +582,7 @@ namespace ServiceStack.Text.Tests.JsonTests
 
             JsConfig<Foo>.RawSerializeFn = obj =>
             {
-                using (JsConfig.With(includeNullValues: true))
+                using (JsConfig.With(new Config { IncludeNullValues = true }))
                     return obj.ToJson();
             };
 
@@ -593,7 +596,7 @@ namespace ServiceStack.Text.Tests.JsonTests
         {
             JsConfig<Foo>.RawDeserializeFn = json =>
             {
-                using (JsConfig.With(includeNullValues: true))
+                using (JsConfig.With(new Config { IncludeNullValues = true }))
                     return json.FromJson<Foo>();
             };
 
@@ -605,7 +608,7 @@ namespace ServiceStack.Text.Tests.JsonTests
         [Test]
         public void Does_include_null_values_in_lists()
         {
-            using (JsConfig.With(includeNullValues: true))
+            using (JsConfig.With(new Config { IncludeNullValues = true }))
             {
                 var dto = new List<DateTime?>
                 {
@@ -623,5 +626,50 @@ namespace ServiceStack.Text.Tests.JsonTests
                 Assert.That(fromJson.Count, Is.EqualTo(dto.Count));
             }
         }
+
+        [Test]
+        public void Can_deserialize_int_with_null_values()
+        {
+            var json = "{\"id\":null,\"name\":null}";
+            var dto = json.FromJson<ModelWithIdAndName>();
+            
+            Assert.That(dto.Id, Is.EqualTo(default(int)));
+            Assert.That(dto.Name, Is.Null);
+        }
+        
+        public partial class ThrowValidation
+        {
+            public virtual int Age { get; set; }
+            public virtual string Required { get; set; }
+            public virtual string Email { get; set; }
+        }
+
+        [Test]
+        public void Can_deserialize_ThrowValidation_with_null_values()
+        {
+            var json = "{\"version\":null,\"age\":null,\"required\":null,\"email\":\"invalidemail\"}";
+            var dto = json.FromJson<ThrowValidation>();
+            
+            Assert.That(dto.Age, Is.EqualTo(default(int)));
+            Assert.That(dto.Required, Is.Null);            
+            Assert.That(dto.Email, Is.EqualTo("invalidemail"));            
+        }
+
+        class TestTrim
+        {
+            public string Description { get; set; }
+        }
+
+        [Test]
+        public void Can_deserialize_custom_string_deserializer()
+        {
+            JsConfig<string>.DeSerializeFn = str => str.Trim();
+            var json = "{\"description\":null}";
+            var dto = json.FromJson<TestTrim>();
+            Assert.That(dto.Description, Is.Null);
+            JsConfig<string>.DeSerializeFn = null;
+        }
+
+        
     }
 }

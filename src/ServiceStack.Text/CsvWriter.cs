@@ -122,9 +122,10 @@ namespace ServiceStack.Text
     {
         public static bool HasAnyEscapeChars(string value)
         {
-            return CsvConfig.EscapeStrings.Any(value.Contains)
-                || value[0] == JsWriter.ListStartChar
-                || value[0] == JsWriter.MapStartChar;
+            return !string.IsNullOrEmpty(value) 
+               && (CsvConfig.EscapeStrings.Any(value.Contains)
+                    || value[0] == JsWriter.ListStartChar
+                    || value[0] == JsWriter.MapStartChar);
         }
 
         internal static void WriteItemSeperatorIfRanOnce(TextWriter writer, ref bool ranOnce)
@@ -162,7 +163,6 @@ namespace ServiceStack.Text
             Headers = new List<string>();
 
             PropertyGetters = new List<GetMemberDelegate<T>>();
-            var isDataContract = typeof(T).IsDto();
             foreach (var propertyInfo in TypeConfig<T>.Properties)
             {
                 if (!propertyInfo.CanRead || propertyInfo.GetGetMethod(nonPublic:true) == null) continue;
@@ -170,12 +170,9 @@ namespace ServiceStack.Text
 
                 PropertyGetters.Add(propertyInfo.CreateGetter<T>());
                 var propertyName = propertyInfo.Name;
-                if (isDataContract)
-                {
-                    var dcsDataMemberName = propertyInfo.GetDataMemberName();
-                    if (dcsDataMemberName != null)
-                        propertyName = dcsDataMemberName;
-                }
+                var dcsDataMemberName = propertyInfo.GetDataMemberName();
+                if (dcsDataMemberName != null)
+                    propertyName = dcsDataMemberName;
                 Headers.Add(propertyName);
             }
         }

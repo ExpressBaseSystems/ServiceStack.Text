@@ -1,7 +1,7 @@
 //Copyright (c) ServiceStack, Inc. All Rights Reserved.
 //License: https://raw.github.com/ServiceStack/ServiceStack/master/license.txt
 
-#if NETSTANDARD2_0
+#if NETSTANDARD
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,13 +11,9 @@ using ServiceStack.Text.Common;
 using ServiceStack.Text.Json;
 using System.Globalization;
 using System.Reflection;
-using System.Reflection.Emit;
-using System.Runtime.InteropServices;
 using System.Net;
 
 using System.Collections.Specialized;
-using System.Linq.Expressions;
-using Microsoft.Extensions.Primitives;
 
 namespace ServiceStack
 {
@@ -53,61 +49,20 @@ namespace ServiceStack
             "--MM--zzzzzz",
         };
 
-        static readonly Action<HttpWebRequest, string> SetUserAgentDelegate =
-            (Action<HttpWebRequest, string>)typeof(HttpWebRequest)
-                .GetProperty("UserAgent")
-                ?.GetSetMethod(nonPublic:true)?.CreateDelegate(typeof(Action<HttpWebRequest, string>));
-
-        static readonly Action<HttpWebRequest, bool> SetAllowAutoRedirectDelegate =
-            (Action<HttpWebRequest, bool>)typeof(HttpWebRequest)
-                .GetProperty("AllowAutoRedirect")
-                ?.GetSetMethod(nonPublic:true)?.CreateDelegate(typeof(Action<HttpWebRequest, bool>));
-
-        static readonly Action<HttpWebRequest, bool> SetKeepAliveDelegate =
-            (Action<HttpWebRequest, bool>)typeof(HttpWebRequest)
-                .GetProperty("KeepAlive")
-                ?.GetSetMethod(nonPublic:true)?.CreateDelegate(typeof(Action<HttpWebRequest, bool>));
-
-        static readonly Action<HttpWebRequest, long> SetContentLengthDelegate =
-            (Action<HttpWebRequest, long>)typeof(HttpWebRequest)
-                .GetProperty("ContentLength")
-                ?.GetSetMethod(nonPublic:true)?.CreateDelegate(typeof(Action<HttpWebRequest, long>));
-
-        private bool allowToChangeRestrictedHeaders;
-
         public NetStandardPclExport()
         {
             this.PlatformName = Platforms.NetStandard;
-#if NETSTANDARD2_0
             this.DirSep = Path.DirectorySeparatorChar;
-#else 
-            this.DirSep = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? '\\' : '/';
-#endif
-            var req = HttpWebRequest.Create("http://servicestack.net");
-            try
-            {
-                req.Headers[HttpRequestHeader.UserAgent] = "ServiceStack";
-                allowToChangeRestrictedHeaders = true;
-            } catch (ArgumentException)
-            {
-                allowToChangeRestrictedHeaders = false;
-            }
         }
 
         public override string ReadAllText(string filePath)
         {
-            //NET Standard 1.1 does not supported Stream Reader with string constructor
-#if NETSTANDARD2_0
-            using (StreamReader rdr = File.OpenText(filePath))
+            using (var reader = File.OpenText(filePath))
             {
-                return rdr.ReadToEnd();
+                return reader.ReadToEnd();
             }
-#else            
-            return String.Empty;
-#endif
         }
 
-#if NETSTANDARD2_0
         public override bool FileExists(string filePath)
         {
             return File.Exists(filePath);
@@ -173,58 +128,41 @@ namespace ServiceStack
             }
             return relativePath;
         }        
-#endif
+
         public static PclExport Configure()
         {
             Configure(Provider);
             return Provider;
         }
 
-        public override string GetEnvironmentVariable(string name)
-        {
-#if NETSTANDARD2_0
-            return Environment.GetEnvironmentVariable(name);
-#else
-            return null;
-#endif
-        }
+        public override string GetEnvironmentVariable(string name) => Environment.GetEnvironmentVariable(name);
 
-        public override void WriteLine(string line)
-        {
-#if NETSTANDARD2_0
-            Console.WriteLine(line);
-#else
-            System.Diagnostics.Debug.WriteLine(line);
-#endif
-        }
+        public override void WriteLine(string line) => Console.WriteLine(line);
 
-        public override void WriteLine(string format, params object[] args)
-        {
-#if NETSTANDARD2_0
-            Console.WriteLine(format, args);
-#else
-            System.Diagnostics.Debug.WriteLine(format, args);
-#endif
-        }
+        public override void WriteLine(string format, params object[] args) => Console.WriteLine(format, args);
 
-#if NETSTANDARD2_0
         public override void AddCompression(WebRequest webReq)
         {
-            var httpReq = (HttpWebRequest)webReq;
-            //TODO: Restore when AutomaticDecompression added to WebRequest
-            //httpReq.Headers[HttpRequestHeader.AcceptEncoding] = "gzip,deflate";
-            //httpReq.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+            try
+            {
+                var httpReq = (HttpWebRequest)webReq;
+                httpReq.Headers[HttpRequestHeader.AcceptEncoding] = "gzip,deflate";
+                httpReq.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+            }
+            catch (Exception ex)
+            {
+                Tracer.Instance.WriteError(ex);
+            }
         }
 
         public override void AddHeader(WebRequest webReq, string name, string value)
         {
             webReq.Headers[name] = value;
         }
-#endif
 
         public override Assembly[] GetAllAssemblies()
         {
-            return new Assembly[0];
+            return AppDomain.CurrentDomain.GetAssemblies();
         }
 
         public override string GetAssemblyCodeBase(Assembly assembly)
@@ -235,7 +173,6 @@ namespace ServiceStack
             return codeBase;
         }
 
-#if NETSTANDARD2_0
         public override string GetAssemblyPath(Type source)
         {
             var codeBase = GetAssemblyCodeBase(source.GetTypeInfo().Assembly);
@@ -255,7 +192,6 @@ namespace ServiceStack
         {
             return System.Text.Encoding.ASCII.GetBytes(str);
         }
-#endif
 
         public override bool InSameAssembly(Type t1, Type t2)
         {
@@ -267,86 +203,6 @@ namespace ServiceStack
             return type.GetTypeInfo().ImplementedInterfaces.FirstOrDefault(t =>
                 t.IsGenericType
                 && t.GetGenericTypeDefinition() == typeof(ICollection<>));
-        }
-
-        public override GetMemberDelegate CreateGetter(PropertyInfo propertyInfo)
-        {
-            return
-#if NETSTANDARD2_0
-                SupportsEmit ? PropertyInvoker.GetEmit(propertyInfo) :
-#endif
-                SupportsExpression
-                    ? PropertyInvoker.GetExpression(propertyInfo)
-                    : base.CreateGetter(propertyInfo);
-        }
-
-        public override GetMemberDelegate<T> CreateGetter<T>(PropertyInfo propertyInfo)
-        {
-            return
-#if NETSTANDARD2_0
-                SupportsEmit ? PropertyInvoker.GetEmit<T>(propertyInfo) :
-#endif
-                SupportsExpression
-                    ? PropertyInvoker.GetExpression<T>(propertyInfo)
-                    : base.CreateGetter<T>(propertyInfo);
-        }
-
-        public override SetMemberDelegate CreateSetter(PropertyInfo propertyInfo)
-        {
-            return
-#if NETSTANDARD2_0
-                SupportsEmit ? PropertyInvoker.SetEmit(propertyInfo) :
-#endif
-                SupportsExpression
-                    ? PropertyInvoker.SetExpression(propertyInfo)
-                    : base.CreateSetter(propertyInfo);
-        }
-
-        public override SetMemberDelegate<T> CreateSetter<T>(PropertyInfo propertyInfo)
-        {
-            return SupportsExpression
-                ? PropertyInvoker.SetExpression<T>(propertyInfo)
-                : base.CreateSetter<T>(propertyInfo);
-        }
-
-        public override GetMemberDelegate CreateGetter(FieldInfo fieldInfo)
-        {
-            return
-#if NETSTANDARD2_0
-                SupportsEmit ? FieldInvoker.GetEmit(fieldInfo) :
-#endif
-                SupportsExpression
-                    ? FieldInvoker.GetExpression(fieldInfo)
-                    : base.CreateGetter(fieldInfo);
-        }
-
-        public override GetMemberDelegate<T> CreateGetter<T>(FieldInfo fieldInfo)
-        {
-            return
-#if NETSTANDARD2_0
-                SupportsEmit ? FieldInvoker.GetEmit<T>(fieldInfo) :
-#endif
-                SupportsExpression
-                    ? FieldInvoker.GetExpression<T>(fieldInfo)
-                    : base.CreateGetter<T>(fieldInfo);
-        }
-
-        public override SetMemberDelegate CreateSetter(FieldInfo fieldInfo)
-        {
-            return
-#if NETSTANDARD2_0
-                SupportsEmit ? FieldInvoker.SetEmit(fieldInfo) :
-#endif
-                SupportsExpression
-                    ? FieldInvoker.SetExpression(fieldInfo)
-                    : base.CreateSetter(fieldInfo);
-        }
-
-        public override SetMemberDelegate<T> CreateSetter<T>(FieldInfo fieldInfo)
-        {
-            return SupportsExpression
-                ? FieldInvoker.SetExpression<T>(fieldInfo)
-                : base.CreateSetter<T>(fieldInfo);
         }
 
         public override DateTime ParseXsdDateTimeAsUtc(string dateTimeStr)
@@ -362,17 +218,16 @@ namespace ServiceStack
         //    return TimeZoneInfo.ConvertTimeToUtc(dateTime);
         //}
 
-#if NETSTANDARD2_0
         public override ParseStringDelegate GetSpecializedCollectionParseMethod<TSerializer>(Type type)
         {
             if (type == typeof(StringCollection))
             {
-                return v => ParseStringCollection<TSerializer>(new StringSegment(v));
+                return v => ParseStringCollection<TSerializer>(v.AsSpan());
             }
             return null;
         }
 
-        public override ParseStringSegmentDelegate GetSpecializedCollectionParseStringSegmentMethod<TSerializer>(Type type)
+        public override ParseStringSpanDelegate GetSpecializedCollectionParseStringSpanMethod<TSerializer>(Type type)
         {
             if (type == typeof(StringCollection))
             {
@@ -381,9 +236,10 @@ namespace ServiceStack
             return null;
         }
 
-        private static StringCollection ParseStringCollection<TSerializer>(StringSegment value) where TSerializer : ITypeSerializer
+        private static StringCollection ParseStringCollection<TSerializer>(ReadOnlySpan<char> value) where TSerializer : ITypeSerializer
         {
-            if (!(value = DeserializeListWithElements<TSerializer>.StripList(value)).HasValue) return null;
+            if ((value = DeserializeListWithElements<TSerializer>.StripList(value)).IsNullOrEmpty()) 
+                return value.IsEmpty ? null : new StringCollection();
 
             var result = new StringCollection();
 
@@ -397,69 +253,60 @@ namespace ServiceStack
 
             return result;
         }
-#endif
-        public override ParseStringDelegate GetJsReaderParseMethod<TSerializer>(Type type)
-        {
-            if (type.IsAssignableFrom(typeof(System.Dynamic.IDynamicMetaObjectProvider)) ||
-                type.HasInterface(typeof(System.Dynamic.IDynamicMetaObjectProvider)))
-            {
-                return DeserializeDynamic<TSerializer>.Parse;
-            }
-
-            return null;
-        }
-
-        public override ParseStringSegmentDelegate GetJsReaderParseStringSegmentMethod<TSerializer>(Type type)
-        {
-            if (type.IsAssignableFrom(typeof(System.Dynamic.IDynamicMetaObjectProvider)) ||
-                type.HasInterface(typeof(System.Dynamic.IDynamicMetaObjectProvider)))
-            {
-                return DeserializeDynamic<TSerializer>.ParseStringSegment;
-            }
-            
-            return null;
-        }
-
         public override void SetUserAgent(HttpWebRequest httpReq, string value)
         {
-            if (SetUserAgentDelegate != null)
+            try
             {
-                SetUserAgentDelegate(httpReq, value);
-            } else 
+                httpReq.UserAgent = value;
+            }
+            catch (Exception e) // API may have been removed by Xamarin's Linker
             {
-                if (allowToChangeRestrictedHeaders)
-                    httpReq.Headers[HttpRequestHeader.UserAgent] = value;
+                Tracer.Instance.WriteError(e);
             }
         }
 
         public override void SetContentLength(HttpWebRequest httpReq, long value)
         {
-            if (SetContentLengthDelegate != null)
+            try
             {
-                SetContentLengthDelegate(httpReq, value);
-            } else 
+                httpReq.ContentLength = value;
+            }
+            catch (Exception e) // API may have been removed by Xamarin's Linker
             {
-                if (allowToChangeRestrictedHeaders)
-                    httpReq.Headers[HttpRequestHeader.ContentLength] = value.ToString();
+                Tracer.Instance.WriteError(e);
             }
         }
 
         public override void SetAllowAutoRedirect(HttpWebRequest httpReq, bool value)
         {
-            SetAllowAutoRedirectDelegate?.Invoke(httpReq, value);
+            try
+            {
+                httpReq.AllowAutoRedirect = value;
+            }
+            catch (Exception e) // API may have been removed by Xamarin's Linker
+            {
+                Tracer.Instance.WriteError(e);
+            }
         }
 
         public override void SetKeepAlive(HttpWebRequest httpReq, bool value)
         {
-            SetKeepAliveDelegate?.Invoke(httpReq, value);
+            try
+            {
+                httpReq.KeepAlive = value;
+            }
+            catch (Exception e) // API may have been removed by Xamarin's Linker
+            {
+                Tracer.Instance.WriteError(e);
+            }
         }
 
         public override void InitHttpWebRequest(HttpWebRequest httpReq,
             long? contentLength = null, bool allowAutoRedirect = true, bool keepAlive = true)
         {
-            SetUserAgent(httpReq, Env.ServerUserAgent);
-            SetAllowAutoRedirect(httpReq, allowAutoRedirect);
-            SetKeepAlive(httpReq, keepAlive);
+            httpReq.UserAgent = Env.ServerUserAgent;
+            httpReq.AllowAutoRedirect = allowAutoRedirect;
+            httpReq.KeepAlive = keepAlive;
 
             if (contentLength != null)
             {
@@ -474,29 +321,28 @@ namespace ServiceStack
             string userAgent = null,
             bool? preAuthenticate = null)
         {
-            //req.MaximumResponseHeadersLength = int.MaxValue; //throws "The message length limit was exceeded" exception
-            if (allowAutoRedirect.HasValue) SetAllowAutoRedirect(req, allowAutoRedirect.Value);
-            //if (readWriteTimeout.HasValue) req.ReadWriteTimeout = (int)readWriteTimeout.Value.TotalMilliseconds;
-            //if (timeout.HasValue) req.Timeout = (int)timeout.Value.TotalMilliseconds;
-            if (userAgent != null) SetUserAgent(req, userAgent);
-            //if (preAuthenticate.HasValue) req.PreAuthenticate = preAuthenticate.Value;
+            try
+            {
+                //req.MaximumResponseHeadersLength = int.MaxValue; //throws "The message length limit was exceeded" exception
+                if (allowAutoRedirect.HasValue) 
+                    req.AllowAutoRedirect = allowAutoRedirect.Value;
+
+                if (userAgent != null)
+                    req.UserAgent = userAgent;
+
+                if (readWriteTimeout.HasValue) req.ReadWriteTimeout = (int) readWriteTimeout.Value.TotalMilliseconds;
+                if (timeout.HasValue) req.Timeout = (int) timeout.Value.TotalMilliseconds;
+
+                if (preAuthenticate.HasValue)
+                    req.PreAuthenticate = preAuthenticate.Value;
+            }
+            catch (Exception ex)
+            {
+                Tracer.Instance.WriteError(ex);
+            }
         }
         
-#if NETSTANDARD2_0
-        public override string GetStackTrace()
-        {
-            return Environment.StackTrace;
-        }
-#endif
-
-        public override Type UseType(Type type)
-        {
-            if (type.IsInterface || type.IsAbstract)
-            {
-                return DynamicProxy.GetInstanceFor(type).GetType();
-            }
-            return type;
-        }
+        public override string GetStackTrace() => Environment.StackTrace;
 
         public static void InitForAot()
         {
@@ -638,7 +484,7 @@ namespace ServiceStack
                 if (JsonWriter<T>.WriteFn() != null) i++;
                 if (JsonWriter.Instance.GetWriteFn<T>() != null) i++;
                 if (JsonReader.Instance.GetParseFn<T>() != null) i++;
-                if (JsonReader<T>.Parse(null) != null) i++;
+                if (JsonReader<T>.Parse(default(ReadOnlySpan<char>)) != null) i++;
                 if (JsonReader<T>.GetParseFn() != null) i++;
                 //if (JsWriter.GetTypeSerializer<JsonTypeSerializer>().GetWriteFn<T>() != null) i++;
                 if (new List<T>() != null) i++;
@@ -671,16 +517,16 @@ namespace ServiceStack
 
             internal static void RegisterElement<T, TElement, TSerializer>() where TSerializer : ITypeSerializer
             {
-                DeserializeDictionary<TSerializer>.ParseDictionary<T, TElement>(null, null, null, null);
-                DeserializeDictionary<TSerializer>.ParseDictionary<TElement, T>(null, null, null, null);
+                DeserializeDictionary<TSerializer>.ParseDictionary<T, TElement>(default(ReadOnlySpan<char>), null, null, null);
+                DeserializeDictionary<TSerializer>.ParseDictionary<TElement, T>(default(ReadOnlySpan<char>), null, null, null);
 
                 ToStringDictionaryMethods<T, TElement, TSerializer>.WriteIDictionary(null, null, null, null);
                 ToStringDictionaryMethods<TElement, T, TSerializer>.WriteIDictionary(null, null, null, null);
 
                 // Include List deserialisations from the Register<> method above.  This solves issue where List<Guid> properties on responses deserialise to null.
                 // No idea why this is happening because there is no visible exception raised.  Suspect IOS is swallowing an AOT exception somewhere.
-                DeserializeArrayWithElements<TElement, TSerializer>.ParseGenericArray(null, null);
-                DeserializeListWithElements<TElement, TSerializer>.ParseGenericList(null, null, null);
+                DeserializeArrayWithElements<TElement, TSerializer>.ParseGenericArray(default(ReadOnlySpan<char>), null);
+                DeserializeListWithElements<TElement, TSerializer>.ParseGenericList(default(ReadOnlySpan<char>), null, null);
 
                 // Cannot use the line below for some unknown reason - when trying to compile to run on device, mtouch bombs during native code compile.
                 // Something about this line or its inner workings is offensive to mtouch. Luckily this was not needed for my List<Guide> issue.

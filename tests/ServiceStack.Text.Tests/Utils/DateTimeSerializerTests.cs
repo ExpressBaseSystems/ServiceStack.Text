@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Threading;
 using System.Xml;
 using NUnit.Framework;
 using ServiceStack.Text.Common;
@@ -345,7 +346,7 @@ namespace ServiceStack.Text.Tests.Utils
             Assert.AreEqual(DateTimeKind.Local, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
 
             //Can change default behavior with config
-            using (JsConfig.With(alwaysUseUtc: true))
+            using (JsConfig.With(new Config { AlwaysUseUtc = true }))
             {
                 Assert.AreEqual(DateTimeKind.Utc, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
             }
@@ -358,7 +359,7 @@ namespace ServiceStack.Text.Tests.Utils
             Assert.AreEqual(DateTimeKind.Local, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
 
             //Can change default behavior with config
-            using (JsConfig.With(alwaysUseUtc: true))
+            using (JsConfig.With(new Config { AlwaysUseUtc = true }))
             {
                 Assert.AreEqual(DateTimeKind.Utc, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
             }
@@ -407,7 +408,7 @@ namespace ServiceStack.Text.Tests.Utils
             Assert.AreEqual(deserilizedResult.Date, testObject.Date);
             Assert.AreEqual(DateTimeKind.Utc, deserilizedResult.Date.Kind);
 
-            using (JsConfig.With(skipDateTimeConversion: false))
+            using (JsConfig.With(new Config { SkipDateTimeConversion = false }))
             {
                 Assert.AreEqual(DateTimeKind.Local, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
             }
@@ -421,11 +422,11 @@ namespace ServiceStack.Text.Tests.Utils
             Assert.AreEqual(deserilizedResult.Date, testObject.Date);
             Assert.AreEqual(DateTimeKind.Utc, deserilizedResult.Date.Kind);
 
-            using (JsConfig.With(skipDateTimeConversion: false))
+            using (JsConfig.With(new Config { SkipDateTimeConversion = false }))
             {
                 Assert.AreEqual(DateTimeKind.Local, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
             }
-            using (JsConfig.With(alwaysUseUtc: true, skipDateTimeConversion: false)) //It will work now
+            using (JsConfig.With(new Config { AlwaysUseUtc = true, SkipDateTimeConversion = false }))
             {
                 Assert.AreEqual(DateTimeKind.Utc, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
             }
@@ -440,11 +441,11 @@ namespace ServiceStack.Text.Tests.Utils
             Assert.AreEqual(deserilizedResult.Date, testObject.Date);
             Assert.AreEqual(DateTimeKind.Local, deserilizedResult.Date.Kind);
 
-            using (JsConfig.With(alwaysUseUtc: true))
+            using (JsConfig.With(new Config { AlwaysUseUtc = true }))
             {
                 Assert.AreEqual(DateTimeKind.Local, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
             }
-            using (JsConfig.With(alwaysUseUtc: true, skipDateTimeConversion: false))
+            using (JsConfig.With(new Config { AlwaysUseUtc = true, SkipDateTimeConversion = false }))
             {
                 Assert.AreEqual(DateTimeKind.Utc, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
             }
@@ -459,16 +460,16 @@ namespace ServiceStack.Text.Tests.Utils
             Assert.AreEqual(deserilizedResult.Date, testObject.Date);
             Assert.AreEqual(DateTimeKind.Unspecified, deserilizedResult.Date.Kind);
 
-            using (JsConfig.With(alwaysUseUtc: true))
+            using (JsConfig.With(new Config { AlwaysUseUtc = true }))
             {
                 Assert.AreEqual(DateTimeKind.Unspecified, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
             }
-            using (JsConfig.With(alwaysUseUtc: true, skipDateTimeConversion: false))
+            using (JsConfig.With(new Config { AlwaysUseUtc = true, SkipDateTimeConversion = false }))
             {
                 Assert.AreEqual(DateTimeKind.Utc, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
             }
 
-            using (JsConfig.With(skipDateTimeConversion: false))
+            using (JsConfig.With(new Config { SkipDateTimeConversion = false }))
             {
                 serilizedResult = TypeSerializer.SerializeToString<TestObject>(testObject);
                 deserilizedResult = TypeSerializer.DeserializeFromString<TestObject>(serilizedResult);
@@ -549,7 +550,7 @@ namespace ServiceStack.Text.Tests.Utils
             Assert.AreEqual(DateTimeKind.Local, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
 
             //Can change default behavior with config
-            using (JsConfig.With(alwaysUseUtc: true))
+            using (JsConfig.With(new Config { AlwaysUseUtc = true }))
             {
                 Assert.AreEqual(DateTimeKind.Utc, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
             }
@@ -562,7 +563,7 @@ namespace ServiceStack.Text.Tests.Utils
             Assert.AreEqual(DateTimeKind.Local, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
 
             //Can change default behavior with config
-            using (JsConfig.With(alwaysUseUtc: true))
+            using (JsConfig.With(new Config { AlwaysUseUtc = true }))
             {
                 Assert.AreEqual(DateTimeKind.Utc, TypeSerializer.DeserializeFromString<TestObject>(TypeSerializer.SerializeToString<TestObject>(testObject)).Date.Kind);
             }
@@ -739,6 +740,21 @@ namespace ServiceStack.Text.Tests.Utils
         [Test]
         public void Can_Parse_TimeSpan_NSTimeSpan()
         {
+            var culture = new CultureInfo("en-US");
+            Thread.CurrentThread.CurrentCulture = culture;
+            Thread.CurrentThread.CurrentUICulture = culture;
+
+            Assert.That("31536000".FromJson<TimeSpan>(), Is.EqualTo(TimeSpan.FromDays(365)));
+            Assert.That("31539661.001".FromJson<TimeSpan>(), Is.EqualTo(Time1Y1M1H1S1MS));
+        }
+
+        [Test]
+        public void Can_Parse_TimeSpan_NSTimeSpan_DifferentCulture()
+        {
+            var culture = new CultureInfo("sl-SI");
+            Thread.CurrentThread.CurrentCulture = culture;
+            Thread.CurrentThread.CurrentUICulture = culture;
+
             Assert.That("31536000".FromJson<TimeSpan>(), Is.EqualTo(TimeSpan.FromDays(365)));
             Assert.That("31539661.001".FromJson<TimeSpan>(), Is.EqualTo(Time1Y1M1H1S1MS));
         }

@@ -61,7 +61,7 @@ namespace ServiceStack.Text.Tests
         [Test]
         public void Null_or_Empty_string_returns_null()
         {
-            var convertedJsvValues = TypeSerializer.DeserializeFromString<List<string>>(null);
+            var convertedJsvValues = TypeSerializer.DeserializeFromString<List<string>>((string)null);
             Assert.That(convertedJsvValues, Is.EqualTo(null));
 
             convertedJsvValues = TypeSerializer.DeserializeFromString<List<string>>(string.Empty);
@@ -78,7 +78,7 @@ namespace ServiceStack.Text.Tests
         [Test]
         public void Null_or_Empty_string_returns_null_Map()
         {
-            var convertedStringValues = TypeSerializer.DeserializeFromString<Dictionary<string, string>>(null);
+            var convertedStringValues = TypeSerializer.DeserializeFromString<Dictionary<string, string>>((string)null);
             Assert.That(convertedStringValues, Is.EqualTo(null));
 
             convertedStringValues = TypeSerializer.DeserializeFromString<Dictionary<string, string>>(string.Empty);
@@ -133,7 +133,7 @@ namespace ServiceStack.Text.Tests
         [Test]
         public void Can_convert_to_nullable_enum_with_null_value()
         {
-            var enumValue = TypeSerializer.DeserializeFromString<TestEnum?>(null);
+            var enumValue = TypeSerializer.DeserializeFromString<TestEnum?>((string)null);
             Assert.That(enumValue, Is.Null);
         }
 
@@ -391,7 +391,6 @@ namespace ServiceStack.Text.Tests
             return fromJsonModel;
         }
 
-#if !IOS
         public class TestClass
         {
             [Required]
@@ -624,6 +623,24 @@ namespace ServiceStack.Text.Tests
             Assert.That("01".FromJson<long>(), Is.EqualTo(1));
             Assert.That("01".FromJson<ulong>(), Is.EqualTo(1));
         }
-#endif
+        
+        public class EmptyCollections
+        {
+            public string[] Strings { get; set; }
+            public int[] Ints { get; set; }
+            public List<int> IntList { get; set; }
+        }
+
+        [Test]
+        public void Can_deserialize_empty_array()
+        {
+            Assert.That("[]".FromJson<string[]>(), Is.EquivalentTo(new string[0]));
+            Assert.That("[]".FromJson<int[]>(), Is.EquivalentTo(new int[0]));
+            Assert.That("[]".FromJson<List<int>>(), Is.EquivalentTo(new List<int>()));
+            
+            Assert.That("{\"Strings\":[]}".FromJson<EmptyCollections>().Strings, Is.EquivalentTo(new string[0]));
+            Assert.That("{\"Ints\":[]}".FromJson<EmptyCollections>().Ints, Is.EquivalentTo(new int[0]));
+            Assert.That("{\"IntList\":[]}".FromJson<EmptyCollections>().IntList, Is.EquivalentTo(new List<int>()));
+        }
     }
 }

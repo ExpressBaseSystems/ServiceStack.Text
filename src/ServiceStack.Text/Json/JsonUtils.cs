@@ -4,11 +4,6 @@
 using System;
 using System.IO;
 using System.Runtime.CompilerServices;
-#if NETSTANDARD2_0
-using Microsoft.Extensions.Primitives;
-#endif
-using ServiceStack.Text.Support;
-
 
 namespace ServiceStack.Text.Json
 {
@@ -58,8 +53,9 @@ namespace ServiceStack.Text.Json
                 return;
             }
 
-            var escapeHtmlChars = JsConfig.EscapeHtmlChars;
-            var escapeUnicode = JsConfig.EscapeUnicode;
+            var config = JsConfig.GetConfig();
+            var escapeHtmlChars = config.EscapeHtmlChars;
+            var escapeUnicode = config.EscapeUnicode;
 
             if (!HasAnyEscapeChars(value, escapeHtmlChars))
             {
@@ -216,11 +212,11 @@ namespace ServiceStack.Text.Json
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsJsObject(StringSegment value)
+        public static bool IsJsObject(ReadOnlySpan<char> value)
         {
             return !value.IsNullOrEmpty()
-                   && value.GetChar(0) == '{'
-                   && value.GetChar(value.Length - 1) == '}';
+               && value[0] == '{'
+               && value[value.Length - 1] == '}';
         }
 
 
@@ -233,11 +229,11 @@ namespace ServiceStack.Text.Json
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static bool IsJsArray(StringSegment value)
+        public static bool IsJsArray(ReadOnlySpan<char> value)
         {
             return !value.IsNullOrEmpty()
-                   && value.GetChar(0) == '['
-                   && value.GetChar(value.Length - 1) == ']';
+               && value[0] == '['
+               && value[value.Length - 1] == ']';
         }
 
     }

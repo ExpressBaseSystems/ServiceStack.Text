@@ -4,6 +4,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.IO.Compression;
 using System.Reflection;
 using NUnit.Framework;
 
@@ -44,6 +45,7 @@ namespace ServiceStack.Text.Tests
         [SetUp]
         public void SetUp()
         {
+            
             LicenseUtils.RemoveLicense();
         }
 
@@ -244,6 +246,53 @@ namespace ServiceStack.Text.Tests
             var result = "2020-01-01".FromJson<DateTime>();
 
             Assert.That(result, Is.EqualTo(fixedDate));
+        }
+
+        public class OldLicenseKey
+        {
+            public string Ref { get; set; }
+            public string Name { get; set; }
+            public LicenseType Type { get; set; }
+            public string Hash { get; set; }
+            public DateTime Expiry { get; set; }
+        }
+
+        [Test]
+        public void Does_deserialize_LicenseKey()
+        {
+            var key = new LicenseKey {
+                Name = "The Name",
+                Ref = "1000",
+                Type = LicenseType.Business,
+                Expiry = new DateTime(2001,01,01),
+                Meta = (long)(LicenseMeta.Subscription | LicenseMeta.Cores),
+            };
+
+            var jsv = key.ToJsv();
+            Assert.That(jsv, Does.Contain($"eta:" + (int)key.Meta));
+            jsv.Print();
+            
+            var fromKey = jsv.FromJsv<LicenseKey>();
+            
+            Assert.That(fromKey.Name, Is.EqualTo(key.Name));
+            Assert.That(fromKey.Ref, Is.EqualTo(key.Ref));
+            Assert.That(fromKey.Type, Is.EqualTo(key.Type));
+            Assert.That(fromKey.Expiry, Is.EqualTo(key.Expiry));
+            Assert.That(fromKey.Meta, Is.EqualTo(key.Meta));
+
+            var oldKey = jsv.FromJsv<OldLicenseKey>();
+            Assert.That(oldKey.Name, Is.EqualTo(key.Name));
+            Assert.That(oldKey.Ref, Is.EqualTo(key.Ref));
+            Assert.That(oldKey.Type, Is.EqualTo(key.Type));
+            Assert.That(oldKey.Expiry, Is.EqualTo(key.Expiry));
+
+            var oldJsv = oldKey.ToJsv();
+            fromKey = oldJsv.FromJsv<LicenseKey>();
+            Assert.That(fromKey.Name, Is.EqualTo(key.Name));
+            Assert.That(fromKey.Ref, Is.EqualTo(key.Ref));
+            Assert.That(fromKey.Type, Is.EqualTo(key.Type));
+            Assert.That(fromKey.Expiry, Is.EqualTo(key.Expiry));
+            Assert.That(fromKey.Meta, Is.EqualTo(0));
         }
     }
 }

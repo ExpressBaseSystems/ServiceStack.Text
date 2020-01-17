@@ -237,6 +237,7 @@ namespace ServiceStack.Text.Tests
             Assert.That("lllUlllUlll".ToCamelCase(), Is.EqualTo("lllUlllUlll"));
             Assert.That("".ToCamelCase(), Is.EqualTo(""));
             Assert.That(((string)null).ToCamelCase(), Is.EqualTo((string)null));
+            Assert.That("__type".ToCamelCase(), Is.EqualTo("__type"));
         }
 
         [Test]
@@ -300,7 +301,7 @@ namespace ServiceStack.Text.Tests
             Assert.That("a".ParseKeyValueText().Count, Is.EqualTo(1));
             Assert.That("a".ParseKeyValueText()["a"], Is.Null);
             Assert.That("a ".ParseKeyValueText().Count, Is.EqualTo(1));
-            Assert.That("a ".ParseKeyValueText()["a"], Is.EqualTo(""));
+            Assert.That("a ".ParseKeyValueText()["a"], Is.Null);
             Assert.That("a b".ParseKeyValueText()["a"], Is.EqualTo("b"));
             Assert.That("a b c".ParseKeyValueText()["a"], Is.EqualTo("b c"));
             Assert.That("a  b c ".ParseKeyValueText()["a"], Is.EqualTo("b c"));
@@ -343,6 +344,57 @@ namespace ServiceStack.Text.Tests
             Assert.That("aa_bb".ToPascalCase(), Is.EqualTo("AaBb"));
             Assert.That("Aa_Bb".ToPascalCase(), Is.EqualTo("AaBb"));
             Assert.That("AA_BB".ToPascalCase(), Is.EqualTo("AaBb"));
+            Assert.That("__type".ToPascalCase(), Is.EqualTo("Type"));
+        }
+
+        [Test]
+        public void Does_ContainsAny_Return_CaseInsensitive_Matches()
+        {
+            var testMatches = new string[] { "abc" };
+            var input = "ABC";
+
+            Assert.That(input.ContainsAny(testMatches, StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Test]
+        public void Does_ReplaceAll_from_Start()
+        {
+            Assert.That("/images".ReplaceAll("/",""), Is.EqualTo("images"));
+        }
+
+        [TestCase("", ExpectedResult = "/")]
+        [TestCase("/", ExpectedResult = "/")]
+        [TestCase("?p1=asdf", ExpectedResult = "/?p1=asdf")]
+        [TestCase("/page", ExpectedResult = "/page/")]
+        [TestCase("/page/", ExpectedResult = "/page/")]
+        [TestCase("/page?p1=asdf", ExpectedResult = "/page/?p1=asdf")]
+        [TestCase("/page?p1=asdf&p2=asdf", ExpectedResult = "/page/?p1=asdf&p2=asdf")]
+        [TestCase("/page/?p1=asdf&p2=asdf", ExpectedResult = "/page/?p1=asdf&p2=asdf")]
+
+        [TestCase("#here", ExpectedResult = "/#here")]
+        [TestCase("?p1=asdf#here", ExpectedResult = "/?p1=asdf#here")]
+        [TestCase("/page#here", ExpectedResult = "/page/#here")]
+        [TestCase("/page/#here", ExpectedResult = "/page/#here")]
+        [TestCase("/page?p1=asdf#here", ExpectedResult = "/page/?p1=asdf#here")]
+        [TestCase("/page?p1=asdf&p2=asdf#here", ExpectedResult = "/page/?p1=asdf&p2=asdf#here")]
+        [TestCase("/page/?p1=asdf&p2=asdf#here", ExpectedResult = "/page/?p1=asdf&p2=asdf#here")]
+
+        [TestCase("domain.com", ExpectedResult = "domain.com/")]
+        [TestCase("domain.com/", ExpectedResult = "domain.com/")]
+        [TestCase("domain.com?p1=asdf", ExpectedResult = "domain.com/?p1=asdf")]
+        [TestCase("domain.com/page?p1=asdf", ExpectedResult = "domain.com/page/?p1=asdf")]
+        [TestCase("domain.com/page?p1=asdf&p2=asdf", ExpectedResult = "domain.com/page/?p1=asdf&p2=asdf")]
+        [TestCase("domain.com/page/?p1=asdf&p2=asdf", ExpectedResult = "domain.com/page/?p1=asdf&p2=asdf")]
+
+        [TestCase("domain.com#here", ExpectedResult = "domain.com/#here")]
+        [TestCase("domain.com/#here", ExpectedResult = "domain.com/#here")]
+        [TestCase("domain.com?p1=asdf#here", ExpectedResult = "domain.com/?p1=asdf#here")]
+        [TestCase("domain.com/page?p1=asdf#here", ExpectedResult = "domain.com/page/?p1=asdf#here")]
+        [TestCase("domain.com/page?p1=asdf&p2=asdf#here", ExpectedResult = "domain.com/page/?p1=asdf&p2=asdf#here")]
+        [TestCase("domain.com/page/?p1=asdf&p2=asdf#here", ExpectedResult = "domain.com/page/?p1=asdf&p2=asdf#here")]
+        public string Does_UrlWithTrailingSlash(string url)
+        {
+            return url.UrlWithTrailingSlash();
         }
     }
 }

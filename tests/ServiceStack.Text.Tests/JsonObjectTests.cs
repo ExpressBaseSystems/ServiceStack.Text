@@ -309,5 +309,128 @@ namespace ServiceStack.Text.Tests
                 new TestJArray { Id = 2, Name = "Role 2" },
             }));
         }
+
+        [Test]
+        public void Can_deserialice_string_list()
+        {
+            var obj = new JsonObject {
+                ["null"] = null,
+                ["item"] = "foo",
+                ["list"] = new List<string> { "foo", "bar", "qux" }.ToJson()
+            };
+
+            var nullList = obj["null"].FromJson<List<string>>();
+            var itemList = obj["item"].FromJson<List<string>>();
+            var listList = obj["list"].FromJson<List<string>>();
+            
+            Assert.That(nullList, Is.Null);
+            Assert.That(itemList, Is.EquivalentTo(new[]{ "foo" }));
+            Assert.That(listList, Is.EquivalentTo(new[]{ "foo", "bar", "qux" }));
+        }
+
+        [Test]
+        public void Can_deserialize_Inherited_JSON_Object()
+        {
+            var jsonValue = "{\"test\":[\"Test1\",\"Test Two\"]}";
+
+            var jsonObject = JsonSerializer.DeserializeFromString<JsonObject>(jsonValue);
+            var inheritedJsonObject = JsonSerializer.DeserializeFromString<InheritedJsonObject>(jsonValue);
+
+            string testString = jsonObject.Child("test");
+            string inheritedTestString = inheritedJsonObject.Child("test");
+
+            Assert.AreEqual(testString, inheritedTestString);
+
+            var serializedJsonObject = JsonSerializer.SerializeToString<JsonObject>(jsonObject);
+            var serializedInheritedJsonObject = JsonSerializer.SerializeToString<InheritedJsonObject>(inheritedJsonObject);
+
+            Assert.AreEqual(serializedJsonObject, serializedInheritedJsonObject);
+        }
+        
+        public class InheritedJsonObject : JsonObject { }
+
+        [Test]
+        public void Does_escape_string_values()
+        {
+            var json = JsonObject.Parse("{\"text\":\"line\nbreak\"}");
+            Assert.That(json["text"], Is.EqualTo("line\nbreak"));
+            
+            json = JsonObject.Parse("{\"a\":{\"text\":\"line\nbreak\"}}");
+            var a = json.Object("a");
+            Assert.That(a["text"], Is.EqualTo("line\nbreak"));
+        }
+        
+        public class JsonObjectWrapper
+        {
+            public JsonObject Prop { get; set; }
+        }
+
+        [Test]
+        public void Does_escape_strings_in_JsonObject_DTO()
+        {
+            var dto = "{\"Prop\":{\"text\":\"line\nbreak\"}}".FromJson<JsonObjectWrapper>();
+            Assert.That(dto.Prop["text"], Is.EqualTo("line\nbreak"));
+            
+            Assert.That(dto.ToJson(), Is.EqualTo("{\"Prop\":{\"text\":\"line\\nbreak\"}}"));
+
+            dto = "{\"Prop\":{\"a\":{\"text\":\"line\nbreak\"}}}".FromJson<JsonObjectWrapper>();
+            var a = dto.Prop.Object("a");
+            Assert.That(a["text"], Is.EqualTo("line\nbreak"));
+            
+            //
+            //Assert.That(dto.ToJson(), Is.EqualTo("{\"Prop\":{\"a\":{\"text\":\"line\\nbreak\"}}}"));
+        }
+
+        public class StringDictionaryWrapper
+        {
+            public Dictionary<string,string> Prop { get; set; }
+        }
+
+        public class NestedStringDictionaryWrapper
+        {
+            public Dictionary<string,Dictionary<string,string>> Prop { get; set; }
+        }
+
+        [Test]
+        public void Does_serialize_StringDictionaryWrapper_line_breaks()
+        {
+            var prop = new Dictionary<string,string> {
+                ["text"] = "line\nbreak"
+            };
+            
+            Assert.That(prop.ToJson(), Is.EqualTo("{\"text\":\"line\\nbreak\"}"));
+            
+            var dto = new StringDictionaryWrapper { Prop = prop };
+            Assert.That(dto.ToJson(), Is.EqualTo("{\"Prop\":{\"text\":\"line\\nbreak\"}}"));
+            
+            var nested = new NestedStringDictionaryWrapper { Prop = new Dictionary<string, Dictionary<string, string>> {
+                    ["a"] = prop
+                } 
+            };
+            Assert.That(nested.ToJson(), Is.EqualTo("{\"Prop\":{\"a\":{\"text\":\"line\\nbreak\"}}}"));
+        }
+        
+        public class ObjectDictionaryWrapper
+        {
+            public object Prop { get; set; }
+        }
+        
+        [Test]
+        public void Does_serialize_ObjectDictionaryWrapper_line_breaks()
+        {
+            var prop = new Dictionary<string,string> {
+                ["text"] = "line\nbreak"
+            };
+
+            var dto = new ObjectDictionaryWrapper { Prop = prop };
+            Assert.That(dto.ToJson(), Is.EqualTo("{\"Prop\":{\"text\":\"line\\nbreak\"}}"));
+
+            var nested = new ObjectDictionaryWrapper { Prop = new Dictionary<string, Dictionary<string, string>> {
+                    ["a"] = prop
+                } 
+            };
+            Assert.That(nested.ToJson(), Is.EqualTo("{\"Prop\":{\"a\":{\"text\":\"line\\nbreak\"}}}"));
+        }
+
     }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using ServiceStack.Text.Common;
 using ServiceStack.Text.Json;
@@ -18,16 +19,13 @@ namespace ServiceStack.Text
         /// </summary>
         public static T Get<T>(this Dictionary<string, string> map, string key, T defaultValue = default(T))
         {
-            string strVal;
-            return map.TryGetValue(key, out strVal) ? JsonSerializer.DeserializeFromString<T>(strVal) : defaultValue;
+            return map.TryGetValue(key, out var strVal) ? JsonSerializer.DeserializeFromString<T>(strVal) : defaultValue;
         }
 
         public static T[] GetArray<T>(this Dictionary<string, string> map, string key)
         {
-            var obj = map as JsonObject;
-            string value;
-            return map.TryGetValue(key, out value) 
-                ? (obj != null ? value.FromJson<T[]>() : value.FromJsv<T[]>()) 
+            return map.TryGetValue(key, out var value) 
+                ? (map is JsonObject obj ? value.FromJson<T[]>() : value.FromJsv<T[]>()) 
                 : TypeConstants<T>.EmptyArray;
         }
 
@@ -36,8 +34,9 @@ namespace ServiceStack.Text
         /// </summary>
         public static string Get(this Dictionary<string, string> map, string key)
         {
-            string strVal;
-            return map.TryGetValue(key, out strVal) ? JsonTypeSerializer.Instance.UnescapeString(strVal) : null;
+            return map.TryGetValue(key, out var strVal) 
+                ? JsonTypeSerializer.Instance.UnescapeString(strVal) 
+                : null;
         }
 
         public static JsonArrayObjects ArrayObjects(this string json)
@@ -79,8 +78,8 @@ namespace ServiceStack.Text
         /// </summary>
         public new string this[string key]
         {
-            get { return this.Get(key); }
-            set { base[key] = value; }
+            get => this.Get(key);
+            set => base[key] = value;
         }
 
         public static JsonObject Parse(string json)
@@ -95,16 +94,14 @@ namespace ServiceStack.Text
 
         public JsonArrayObjects ArrayObjects(string propertyName)
         {
-            string strValue;
-            return this.TryGetValue(propertyName, out strValue)
+            return this.TryGetValue(propertyName, out var strValue)
                 ? JsonArrayObjects.Parse(strValue)
                 : null;
         }
 
         public JsonObject Object(string propertyName)
         {
-            string strValue;
-            return this.TryGetValue(propertyName, out strValue)
+            return this.TryGetValue(propertyName, out var strValue)
                 ? Parse(strValue)
                 : null;
         }
@@ -161,16 +158,14 @@ namespace ServiceStack.Text
 
             if (!strValue.Contains("."))
             {
-                long longValue;
-                if (long.TryParse(strValue, out longValue))
+                if (long.TryParse(strValue, out var longValue))
                 {
                     return longValue < JsonUtils.MaxInteger && longValue > JsonUtils.MinInteger;
                 }
                 return false;
             }
 
-            double doubleValue;
-            if (double.TryParse(strValue, out doubleValue))
+            if (double.TryParse(strValue, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out var doubleValue))
             {
                 return doubleValue < JsonUtils.MaxInteger && doubleValue > JsonUtils.MinInteger;
             }

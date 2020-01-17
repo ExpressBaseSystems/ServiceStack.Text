@@ -38,8 +38,8 @@ namespace ServiceStack.Text.Tests
         [OneTimeSetUp]
         public void TestFixtureSetUp()
         {
-            JsConfig.EmitLowercaseUnderscoreNames = true;
-            JsConfig<Bar>.EmitLowercaseUnderscoreNames = false;
+            JsConfig.TextCase = TextCase.SnakeCase;
+            JsConfig<Bar>.TextCase = TextCase.PascalCase;
         }
 
         [OneTimeTearDown]
@@ -58,7 +58,7 @@ namespace ServiceStack.Text.Tests
         [Test]
         public void Can_override_default_configuration()
         {
-            using (JsConfig.With(emitLowercaseUnderscoreNames: false))
+            using (JsConfig.With(new Config { TextCase = TextCase.PascalCase }))
             {
                 Assert.That(new Foo { FooBar = "value" }.ToJson(), Is.EqualTo("{\"FooBar\":\"value\"}"));
             }
@@ -66,28 +66,26 @@ namespace ServiceStack.Text.Tests
     }
 
     [TestFixture]
-    public class SerializEmitLowerCaseUnderscoreNamesTests
+    public class SerializeEmitLowerCaseUnderscoreNamesTests
     {
         [Test]
         public void TestJsonDataWithJsConfigScope()
         {
-            using (JsConfig.With(emitLowercaseUnderscoreNames: true,
-                propertyConvention: PropertyConvention.Lenient))
+            using (JsConfig.With(new Config { TextCase = TextCase.SnakeCase, PropertyConvention = PropertyConvention.Lenient}))
                 AssertObjectJson();
         }
 
         [Test]
         public void TestCloneObjectWithJsConfigScope()
         {
-            using (JsConfig.With(emitLowercaseUnderscoreNames: true,
-                propertyConvention: PropertyConvention.Lenient))
+            using (JsConfig.With(new Config { TextCase = TextCase.SnakeCase, PropertyConvention = PropertyConvention.Lenient}))
                 AssertObject();
         }
 
         [Test]
         public void TestJsonDataWithJsConfigGlobal()
         {
-            JsConfig.EmitLowercaseUnderscoreNames = true;
+            JsConfig.TextCase = TextCase.SnakeCase;
             JsConfig.PropertyConvention = PropertyConvention.Lenient;
 
             AssertObjectJson();
@@ -98,7 +96,7 @@ namespace ServiceStack.Text.Tests
         [Test]
         public void TestCloneObjectWithJsConfigGlobal()
         {
-            JsConfig.EmitLowercaseUnderscoreNames = true;
+            JsConfig.TextCase = TextCase.SnakeCase;
             JsConfig.PropertyConvention = PropertyConvention.Lenient;
 
             AssertObject();
@@ -109,7 +107,7 @@ namespace ServiceStack.Text.Tests
         [Test]
         public void TestJsonDataWithJsConfigLocal()
         {
-            JsConfig.EmitLowercaseUnderscoreNames = true;
+            JsConfig.TextCase = TextCase.SnakeCase;
             JsConfig.PropertyConvention = PropertyConvention.Lenient;
 
             AssertObjectJson();
@@ -120,8 +118,8 @@ namespace ServiceStack.Text.Tests
         [Test]
         public void TestCloneObjectWithJsConfigLocal()
         {
-            JsConfig.EmitLowercaseUnderscoreNames = false;
-            JsConfig<TestObject>.EmitLowercaseUnderscoreNames = true;
+            JsConfig.TextCase = TextCase.Default;
+            JsConfig<TestObject>.TextCase = TextCase.SnakeCase;
             JsConfig.PropertyConvention = PropertyConvention.Lenient;
 
             AssertObject();
@@ -132,8 +130,8 @@ namespace ServiceStack.Text.Tests
         [Test]
         public void TestCloneObjectWithoutLowercaseThroughJsConfigLocal()
         {
-            JsConfig.EmitLowercaseUnderscoreNames = true;
-            JsConfig<TestObject>.EmitLowercaseUnderscoreNames = false;
+            JsConfig.TextCase = TextCase.SnakeCase;
+            JsConfig<TestObject>.TextCase = TextCase.Default;
             JsConfig.PropertyConvention = PropertyConvention.Lenient;
 
             AssertObject();
@@ -211,37 +209,86 @@ namespace ServiceStack.Text.Tests
         [Test]
         public void Does_create_scope_from_string()
         {
-            var scope = JsConfig.CreateScope("EmitCamelCaseNames,emitlowercaseunderscorenames,IncludeNullValues:false,ExcludeDefaultValues:0,IncludeDefaultEnums:1");
-            Assert.That(scope.EmitCamelCaseNames.Value);
-            Assert.That(scope.EmitLowercaseUnderscoreNames.Value);
-            Assert.That(!scope.IncludeNullValues.Value);
-            Assert.That(!scope.ExcludeDefaultValues.Value);
-            Assert.That(scope.IncludeDefaultEnums.Value);
+            var scope = JsConfig.CreateScope("emitlowercaseunderscorenames,IncludeNullValues:false,ExcludeDefaultValues:0,IncludeDefaultEnums:1");
+            Assert.That(scope.TextCase, Is.EqualTo(TextCase.SnakeCase));
+            Assert.That(!scope.IncludeNullValues);
+            Assert.That(!scope.ExcludeDefaultValues);
+            Assert.That(scope.IncludeDefaultEnums);
             scope.Dispose();
 
-            scope = JsConfig.CreateScope("DateHandler:ISO8601,timespanhandler:durationformat,PropertyConvention:strict");
+            scope = JsConfig.CreateScope("DateHandler:ISO8601,timespanhandler:durationformat,PropertyConvention:strict,TextCase:CamelCase");
             Assert.That(scope.DateHandler, Is.EqualTo(DateHandler.ISO8601));
             Assert.That(scope.TimeSpanHandler, Is.EqualTo(TimeSpanHandler.DurationFormat));
             Assert.That(scope.PropertyConvention, Is.EqualTo(PropertyConvention.Strict));
+            Assert.That(scope.TextCase, Is.EqualTo(TextCase.CamelCase));
             scope.Dispose();
         }
 
         [Test]
         public void Does_create_scope_from_string_using_CamelCaseHumps()
         {
-            var scope = JsConfig.CreateScope("eccn,elun,inv:false,edv:0,ide:1");
-            Assert.That(scope.EmitCamelCaseNames.Value);
-            Assert.That(scope.EmitLowercaseUnderscoreNames.Value);
-            Assert.That(!scope.IncludeNullValues.Value);
-            Assert.That(!scope.ExcludeDefaultValues.Value);
-            Assert.That(scope.IncludeDefaultEnums.Value);
+            var scope = JsConfig.CreateScope("eccn,inv:false,edv:0,ide:1");
+            Assert.That(scope.TextCase, Is.EqualTo(TextCase.CamelCase));
+            Assert.That(!scope.IncludeNullValues);
+            Assert.That(!scope.ExcludeDefaultValues);
+            Assert.That(scope.IncludeDefaultEnums);
             scope.Dispose();
 
-            scope = JsConfig.CreateScope("dh:ISO8601,tsh:df,pc:strict");
+            scope = JsConfig.CreateScope("dh:ISO8601,tsh:df,pc:strict,tc:cc");
             Assert.That(scope.DateHandler, Is.EqualTo(DateHandler.ISO8601));
             Assert.That(scope.TimeSpanHandler, Is.EqualTo(TimeSpanHandler.DurationFormat));
             Assert.That(scope.PropertyConvention, Is.EqualTo(PropertyConvention.Strict));
+            Assert.That(scope.TextCase, Is.EqualTo(TextCase.CamelCase));
             scope.Dispose();
+        }
+    }
+
+    public class JsConfigInitTests
+    {
+        [TearDown] public void TearDown() => JsConfig.Reset();
+        
+        [Test]
+        public void Allows_setting_config_before_Init()
+        {
+            JsConfig.MaxDepth = 1;
+            JsConfig.Init(new Config {
+                DateHandler = DateHandler.UnixTime
+            });
+        }
+        
+        [Test]
+        public void Does_not_allow_setting_JsConfig_after_Init()
+        {
+            JsConfig.Init(new Config {
+                DateHandler = DateHandler.UnixTime
+            });
+
+            Assert.Throws<NotSupportedException>(() => JsConfig.MaxDepth = 1000);
+        }
+
+        [Test]
+        public void Does_not_allow_setting_multiple_inits_in_StrictMode()
+        {
+            JsConfig.Init();
+            JsConfig.Init(new Config { MaxDepth = 1 });
+
+            Env.StrictMode = true;
+            
+            Assert.Throws<NotSupportedException>(() => JsConfig.Init());
+        }
+
+        [Test]
+        public void Does_combine_global_configs_in_multiple_inits()
+        {
+            JsConfig.Init(new Config { MaxDepth = 1 });
+            JsConfig.Init(new Config { DateHandler = DateHandler.UnixTime });
+            
+            Assert.That(JsConfig.MaxDepth, Is.EqualTo(1));
+            Assert.That(JsConfig.DateHandler, Is.EqualTo(DateHandler.UnixTime));
+
+            var newConfig = new Config();
+            Assert.That(newConfig.MaxDepth, Is.EqualTo(1));
+            Assert.That(newConfig.DateHandler, Is.EqualTo(DateHandler.UnixTime));
         }
     }
 }

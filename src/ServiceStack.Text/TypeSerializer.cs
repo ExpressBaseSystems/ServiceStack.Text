@@ -13,10 +13,12 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using ServiceStack.Text.Common;
 using ServiceStack.Text.Jsv;
 using ServiceStack.Text.Pools;
@@ -33,7 +35,12 @@ namespace ServiceStack.Text
             JsConfig.InitStatics();
         }
 
-        public static Encoding UTF8Encoding = PclExport.Instance.GetUTF8Encoding(false);
+        [Obsolete("Use JsConfig.UTF8Encoding")]
+        public static UTF8Encoding UTF8Encoding
+        {
+            get => JsConfig.UTF8Encoding;
+            set => JsConfig.UTF8Encoding = value;
+        }
 
         public const string DoubleQuoteString = "\"\"";
 
@@ -60,6 +67,12 @@ namespace ServiceStack.Text
             return (T)JsvReader<T>.Parse(value);
         }
 
+        public static T DeserializeFromSpan<T>(ReadOnlySpan<char> value)
+        {
+            if (value.IsEmpty) return default(T);
+            return (T)JsvReader<T>.Parse(value);
+        }
+
         public static T DeserializeFromReader<T>(TextReader reader)
         {
             return DeserializeFromString<T>(reader.ReadToEnd());
@@ -74,8 +87,15 @@ namespace ServiceStack.Text
         public static object DeserializeFromString(string value, Type type)
         {
             return value == null
-                       ? null
-                       : JsvReader.GetParseFn(type)(value);
+               ? null
+               : JsvReader.GetParseFn(type)(value);
+        }
+
+        public static object DeserializeFromSpan(Type type, ReadOnlySpan<char> value)
+        {
+            return value.IsEmpty
+                ? null
+                : JsvReader.GetParseSpanFn(type)(value);
         }
 
         public static object DeserializeFromReader(TextReader reader, Type type)
@@ -106,8 +126,8 @@ namespace ServiceStack.Text
         public static string SerializeToString(object value, Type type)
         {
             if (value == null) return null;
-            if (type == typeof(string))
-                return value as string;
+            if (value is string str)
+                return str.EncodeJsv();
 
             var writer = StringWriterThreadStatic.Allocate();
             JsvWriter.GetWriteFn(type)(writer, value);
@@ -117,9 +137,9 @@ namespace ServiceStack.Text
         public static void SerializeToWriter<T>(T value, TextWriter writer)
         {
             if (value == null) return;
-            if (typeof(T) == typeof(string))
+            if (value is string str)
             {
-                writer.Write(value);
+                writer.Write(str.EncodeJsv());
             }
             else if (typeof(T) == typeof(object))
             {
@@ -140,9 +160,9 @@ namespace ServiceStack.Text
         public static void SerializeToWriter(object value, Type type, TextWriter writer)
         {
             if (value == null) return;
-            if (type == typeof(string))
+            if (value is string str)
             {
-                writer.Write(value);
+                writer.Write(str.EncodeJsv());
                 return;
             }
 
@@ -164,7 +184,7 @@ namespace ServiceStack.Text
             }
             else
             {
-                var writer = new StreamWriter(stream, UTF8Encoding);
+                var writer = new StreamWriter(stream, JsConfig.UTF8Encoding);
                 JsvWriter<T>.WriteRootObject(writer, value);
                 writer.Flush();
             }
@@ -172,7 +192,7 @@ namespace ServiceStack.Text
 
         public static void SerializeToStream(object value, Type type, Stream stream)
         {
-            var writer = new StreamWriter(stream, UTF8Encoding);
+            var writer = new StreamWriter(stream, JsConfig.UTF8Encoding);
             JsvWriter.GetWriteFn(type)(writer, value);
             writer.Flush();
         }
@@ -186,18 +206,23 @@ namespace ServiceStack.Text
 
         public static T DeserializeFromStream<T>(Stream stream)
         {
-            using (var reader = new StreamReader(stream, UTF8Encoding))
-            {
-                return DeserializeFromString<T>(reader.ReadToEnd());
-            }
+            return (T)MemoryProvider.Instance.Deserialize(stream, typeof(T), DeserializeFromSpan);
         }
 
         public static object DeserializeFromStream(Type type, Stream stream)
         {
-            using (var reader = new StreamReader(stream, UTF8Encoding))
-            {
-                return DeserializeFromString(reader.ReadToEnd(), type);
-            }
+            return MemoryProvider.Instance.Deserialize(stream, type, DeserializeFromSpan);
+        }
+
+        public static Task<object> DeserializeFromStreamAsync(Type type, Stream stream)
+        {
+            return MemoryProvider.Instance.DeserializeAsync(stream, type, DeserializeFromSpan);
+        }
+
+        public static async Task<T> DeserializeFromStreamAsync<T>(Stream stream)
+        {
+            var obj = await MemoryProvider.Instance.DeserializeAsync(stream, typeof(T), DeserializeFromSpan);
+            return (T)obj;
         }
 
         /// <summary>
@@ -223,11 +248,14 @@ namespace ServiceStack.Text
             }
 
             if (obj is IEnumerable<KeyValuePair<string, object>> kvps)
+                return PlatformExtensions.ToStringDictionary(kvps);
+
+            if (obj is NameValueCollection nvc)
             {
                 var to = new Dictionary<string, string>();
-                foreach (var kvp in kvps)
+                for (var i = 0; i < nvc.Count; i++)
                 {
-                    to[kvp.Key] = kvp.Value.ToJsv();
+                    to[nvc.GetKey(i)] = nvc.Get(i);
                 }
                 return to;
             }
@@ -277,8 +305,7 @@ namespace ServiceStack.Text
 
         public static string SerializeAndFormat<T>(this T instance)
         {
-            var fn = instance as Delegate;
-            if (fn != null)
+            if (instance is Delegate fn)
                 return Dump(fn);
 
             var dtoStr = !HasCircularReferences(instance) 
@@ -313,7 +340,7 @@ namespace ServiceStack.Text
         private static bool HasCircularReferences(object value, Stack<object> parentValues)
         {
             var type = value?.GetType();
-
+            
             if (type == null || !type.IsClass || value is string)
                 return false;
 
@@ -322,15 +349,47 @@ namespace ServiceStack.Text
                 parentValues = new Stack<object>();
                 parentValues.Push(value);
             }
+            
+            bool CheckValue(object key)
+            {
+                if (parentValues.Contains(key))
+                    return true;
+
+                parentValues.Push(key);
+
+                if (HasCircularReferences(key, parentValues))
+                    return true;
+
+                parentValues.Pop();
+                return false;
+            }
 
             if (value is IEnumerable valueEnumerable)
             {
                 foreach (var item in valueEnumerable)
                 {
-                    if (HasCircularReferences(item, parentValues))
+                    if (item == null)
+                        continue;
+
+                    var itemType = item.GetType();
+                    if (itemType.IsGenericType && itemType.GetGenericTypeDefinition() == typeof(KeyValuePair<,>))
+                    {
+                        var props = TypeProperties.Get(itemType);
+                        var key = props.GetPublicGetter("Key")(item);
+
+                        if (CheckValue(key)) 
+                            return true;
+
+                        var val = props.GetPublicGetter("Value")(item);
+
+                        if (CheckValue(val)) 
+                            return true;
+                    }
+                    
+                    if (CheckValue(item)) 
                         return true;
                 }
-            }
+            }            
             else
             {
                 var props = type.GetSerializableProperties();
@@ -345,15 +404,8 @@ namespace ServiceStack.Text
                     if (pValue == null)
                         continue;
 
-                    if (parentValues.Contains(pValue))
+                    if (CheckValue(pValue))
                         return true;
-
-                    parentValues.Push(pValue);
-
-                    if (HasCircularReferences(pValue, parentValues))
-                        return true;
-
-                    parentValues.Pop();
                 }
             }
 

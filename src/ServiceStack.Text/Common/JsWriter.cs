@@ -42,7 +42,7 @@ namespace ServiceStack.Text.Common
             {
                 EscapeCharFlags[escapeChar] = true;
             }
-            var loadConfig = JsConfig.EmitCamelCaseNames; //force load
+            var loadConfig = JsConfig.TextCase; //force load
         }
 
         public static void WriteDynamic(Action callback)
@@ -154,7 +154,7 @@ namespace ServiceStack.Text.Common
             }
         }
 
-        public static bool ShouldAllowRuntmieType(Type type)
+        public static bool ShouldAllowRuntimeType(Type type)
         {
             if (!JsState.IsRuntimeType)
                 return true;
@@ -168,8 +168,7 @@ namespace ServiceStack.Text.Common
                 var oAttrs = type.AllAttributes();
                 foreach (var oAttr in oAttrs)
                 {
-                    var attr = oAttr as Attribute;
-                    if (attr == null) continue;
+                    if (!(oAttr is Attribute attr)) continue;
                     if (allowAttributesNamed.Contains(attr.GetType().Name))
                         return true;
                 }
@@ -191,7 +190,7 @@ namespace ServiceStack.Text.Common
 
         public static void AssertAllowedRuntimeType(Type type)
         {
-            if (!ShouldAllowRuntmieType(type))
+            if (!ShouldAllowRuntimeType(type))
                 throw new NotSupportedException($"{type.Name} is not an allowed Runtime Type. Whitelist Type with [RuntimeSerializable] or IRuntimeSerializable.");
         }
     }
@@ -282,9 +281,9 @@ namespace ServiceStack.Text.Common
             else
             {
                 if (underlyingType.IsEnum)
-                    return type.FirstAttribute<FlagsAttribute>() != null
-                        ? (WriteObjectDelegate)Serializer.WriteEnumFlags
-                        : Serializer.WriteEnum;
+                {
+                    return Serializer.WriteEnum;
+                }
             }
 
             if (type.HasInterface(typeof(IFormattable)))
@@ -389,7 +388,7 @@ namespace ServiceStack.Text.Common
                         mapTypeArgs[0], mapTypeArgs[1]);
 
                     var keyWriteFn = Serializer.GetWriteFn(mapTypeArgs[0]);
-                    var valueWriteFn = typeof(T) == typeof(JsonObject)
+                    var valueWriteFn = typeof(JsonObject).IsAssignableFrom(typeof(T))
                         ? JsonObject.WriteValue
                         : Serializer.GetWriteFn(mapTypeArgs[1]);
 
@@ -434,7 +433,7 @@ namespace ServiceStack.Text.Common
             return Serializer.WriteBuiltIn;
         }
 
-        public Dictionary<Type, WriteObjectDelegate> SpecialTypes;
+        public readonly Dictionary<Type, WriteObjectDelegate> SpecialTypes;
 
         public WriteObjectDelegate GetSpecialWriteFn(Type type)
         {

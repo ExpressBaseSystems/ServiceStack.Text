@@ -35,8 +35,7 @@ namespace ServiceStack.Text
                 do
                 {
                     snapshot = WriteFnCache;
-                    newCache = new Dictionary<Type, WriteObjectDelegate>(WriteFnCache);
-                    newCache[type] = writeFn;
+                    newCache = new Dictionary<Type, WriteObjectDelegate>(WriteFnCache) {[type] = writeFn};
 
                 } while (!ReferenceEquals(
                     Interlocked.CompareExchange(ref WriteFnCache, newCache, snapshot), snapshot));
@@ -68,8 +67,7 @@ namespace ServiceStack.Text
                 do
                 {
                     snapshot = ReadFnCache;
-                    newCache = new Dictionary<Type, ParseStringDelegate>(ReadFnCache);
-                    newCache[type] = writeFn;
+                    newCache = new Dictionary<Type, ParseStringDelegate>(ReadFnCache) {[type] = writeFn};
 
                 } while (!ReferenceEquals(
                     Interlocked.CompareExchange(ref ReadFnCache, newCache, snapshot), snapshot));
@@ -153,7 +151,7 @@ namespace ServiceStack.Text
 
         public static T DeserializeFromString<T>(string text)
         {
-            if (string.IsNullOrEmpty(text)) return default(T);
+            if (string.IsNullOrEmpty(text)) return default;
             var results = CsvSerializer<T>.ReadObject(text);
             return ConvertFrom<T>(results);
         }
@@ -161,10 +159,19 @@ namespace ServiceStack.Text
         public static object DeserializeFromString(Type type, string text)
         {
             if (string.IsNullOrEmpty(text)) return null;
-            var fn = GetReadFn(type);
-            var result = fn(text);
-            var converted = ConvertFrom(type, result);
-            return converted;
+            var hold = JsState.IsCsv;
+            JsState.IsCsv = true;
+            try
+            {
+                var fn = GetReadFn(type);
+                var result = fn(text);
+                var converted = ConvertFrom(type, result);
+                return converted;
+            }
+            finally
+            {
+                JsState.IsCsv = hold;
+            }
         }
 
         public static void WriteLateBoundObject(TextWriter writer, object value)
@@ -272,9 +279,9 @@ namespace ServiceStack.Text
             bestCandidateEnumerableType = typeof(T).GetTypeWithGenericTypeDefinitionOf(typeof(IEnumerable<>));
             if (bestCandidateEnumerableType != null)
             {
-                var dictionarOrKvps = typeof(T).HasInterface(typeof(IEnumerable<KeyValuePair<string, object>>))
-                                   || typeof(T).HasInterface(typeof(IEnumerable<KeyValuePair<string, string>>));
-                if (dictionarOrKvps)
+                var dictionaryOrKvps = typeof(T).HasInterface(typeof(IEnumerable<KeyValuePair<string, object>>))
+                                    || typeof(T).HasInterface(typeof(IEnumerable<KeyValuePair<string, string>>));
+                if (dictionaryOrKvps)
                 {
                     return WriteSelf;
                 }

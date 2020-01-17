@@ -47,22 +47,22 @@ namespace ServiceStack.Text //Internalize to avoid conflicts
         public static MemoryStream GetStream(int capacity)
         {
             return UseRecyclableMemoryStream
-                ? RecyclableInstance.GetStream(typeof(MemoryStreamFactory).Name, capacity)
+                ? RecyclableInstance.GetStream(nameof(MemoryStreamFactory), capacity)
                 : new MemoryStream(capacity);
         }
 
         public static MemoryStream GetStream(byte[] bytes)
         {
             return UseRecyclableMemoryStream
-                ? RecyclableInstance.GetStream(typeof(MemoryStreamFactory).Name, bytes, 0, bytes.Length)
-                : new MemoryStream(bytes);
+                ? RecyclableInstance.GetStream(nameof(MemoryStreamFactory), bytes, 0, bytes.Length)
+                : new MemoryStream(bytes, 0, bytes.Length, writable:true, publiclyVisible:true);
         }
 
         public static MemoryStream GetStream(byte[] bytes, int index, int count)
         {
             return UseRecyclableMemoryStream
-                ? RecyclableInstance.GetStream(typeof(MemoryStreamFactory).Name, bytes, index, count)
-                : new MemoryStream(bytes, index, count);
+                ? RecyclableInstance.GetStream(nameof(MemoryStreamFactory), bytes, index, count)
+                : new MemoryStream(bytes, index, count, writable:true, publiclyVisible:true);
         }
     }
 
@@ -689,7 +689,7 @@ namespace ServiceStack.Text //Internalize to avoid conflicts
     /// buffers.
     /// </summary>
     /// <remarks>
-    /// This class works in tandem with the RecylableMemoryStreamManager to supply MemoryStream
+    /// This class works in tandem with the RecyclableMemoryStreamManager to supply MemoryStream
     /// objects to callers, while avoiding these specific problems:
     /// 1. LOH allocations - since all large buffers are pooled, they will never incur a Gen2 GC
     /// 2. Memory waste - A standard memory stream doubles its size when it runs out of room. This

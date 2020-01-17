@@ -334,8 +334,8 @@ namespace ServiceStack
         static Dictionary<Type, EmptyCtorDelegate> ConstructorMethods = new Dictionary<Type, EmptyCtorDelegate>();
         public static EmptyCtorDelegate GetConstructorMethod(Type type)
         {
-            EmptyCtorDelegate emptyCtorFn;
-            if (ConstructorMethods.TryGetValue(type, out emptyCtorFn)) return emptyCtorFn;
+            if (ConstructorMethods.TryGetValue(type, out var emptyCtorFn)) 
+                return emptyCtorFn;
 
             emptyCtorFn = GetConstructorMethodToCache(type);
 
@@ -355,8 +355,8 @@ namespace ServiceStack
         static Dictionary<string, EmptyCtorDelegate> TypeNamesMap = new Dictionary<string, EmptyCtorDelegate>();
         public static EmptyCtorDelegate GetConstructorMethod(string typeName)
         {
-            EmptyCtorDelegate emptyCtorFn;
-            if (TypeNamesMap.TryGetValue(typeName, out emptyCtorFn)) return emptyCtorFn;
+            if (TypeNamesMap.TryGetValue(typeName, out var emptyCtorFn)) 
+                return emptyCtorFn;
 
             var type = JsConfig.TypeFinder(typeName);
             if (type == null) return null;
@@ -379,10 +379,9 @@ namespace ServiceStack
         public static EmptyCtorDelegate GetConstructorMethodToCache(Type type)
         {
             if (type == typeof(string))
-            {
-                return () => String.Empty;
-            }
-            else if (type.IsInterface)
+                return () => string.Empty;
+
+            if (type.IsInterface)
             {
                 if (type.HasGenericType())
                 {
@@ -424,26 +423,7 @@ namespace ServiceStack
                 return realizedType.CreateInstance;
             }
 
-            var emptyCtor = type.GetConstructor(Type.EmptyTypes);
-            if (emptyCtor != null)
-            {
-                if (PclExport.Instance.SupportsEmit)
-                {
-                    var dm = new System.Reflection.Emit.DynamicMethod("MyCtor", type, Type.EmptyTypes,
-                        typeof(ReflectionExtensions).Module, true);
-                    var ilgen = dm.GetILGenerator();
-                    ilgen.Emit(System.Reflection.Emit.OpCodes.Nop);
-                    ilgen.Emit(System.Reflection.Emit.OpCodes.Newobj, emptyCtor);
-                    ilgen.Emit(System.Reflection.Emit.OpCodes.Ret);
-
-                    return (EmptyCtorDelegate) dm.CreateDelegate(typeof(EmptyCtorDelegate));
-                }
-
-                return () => Activator.CreateInstance(type);
-            }
-
-            //Anonymous types don't have empty constructors
-            return () => FormatterServices.GetUninitializedObject(type);
+            return ReflectionOptimizer.Instance.CreateConstructor(type);
         }
 
         private static class TypeMeta<T>
@@ -614,6 +594,20 @@ namespace ServiceStack
                 "IgnoreDataMemberAttribute",
                 "JsonIgnoreAttribute"
             };
+
+            try
+            {
+                JsConfig<Type>.SerializeFn = x => x?.ToString();
+                JsConfig<MethodInfo>.SerializeFn = x => x?.ToString();
+                JsConfig<PropertyInfo>.SerializeFn = x => x?.ToString();
+                JsConfig<FieldInfo>.SerializeFn = x => x?.ToString();
+                JsConfig<MemberInfo>.SerializeFn = x => x?.ToString();
+                JsConfig<ParameterInfo>.SerializeFn = x => x?.ToString();
+            }
+            catch (Exception e)
+            {
+                Tracer.Instance.WriteError("ReflectionExtensions JsConfig<Type>", e);
+            }
         }
 
         public static PropertyInfo[] GetSerializableProperties(this Type type)
@@ -664,7 +658,9 @@ namespace ServiceStack
                     f.HasAttribute<DataMemberAttribute>()).ToArray();
             }
 
-            if (!JsConfig.IncludePublicFields)
+            var config = JsConfig.GetConfig();
+
+            if (!config.IncludePublicFields)
                 return TypeConstants.EmptyFieldInfoArray;
 
             var publicFields = type.GetPublicFields();
@@ -673,7 +669,7 @@ namespace ServiceStack
             return publicFields
                 .Where(prop => prop.AllAttributes()
                     .All(attr => !IgnoreAttributesNamed.Contains(attr.GetType().Name)))
-                .Where(prop => !JsConfig.ExcludeTypes.Contains(prop.FieldType))
+                .Where(prop => !config.ExcludeTypes.Contains(prop.FieldType))
                 .ToArray();
         }
 

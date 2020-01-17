@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using NUnit.Framework;
 using System.Runtime.Serialization;
+using System.Threading;
 
 namespace ServiceStack.Text.Tests.JsonTests
 {
@@ -184,7 +185,7 @@ namespace ServiceStack.Text.Tests.JsonTests
         [Test]
         public void Can_detect_dto_with_no_Version()
         {
-            using (JsConfig.With(modelFactory: type =>
+            using (JsConfig.With(new Config { ModelFactory = type =>
             {
                 if (typeof(IHasVersion).IsAssignableFrom(type))
                 {
@@ -196,7 +197,7 @@ namespace ServiceStack.Text.Tests.JsonTests
                     };
                 }
                 return type.CreateInstance;
-            }))
+            }}))
             {
                 var dto = new Dto { Name = "Foo" };
                 var fromDto = dto.ToJson().FromJson<DtoV1>();
@@ -225,7 +226,7 @@ namespace ServiceStack.Text.Tests.JsonTests
 
             Assert.That(dto.ErrorCode, Is.Null);
 
-            using (JsConfig.With(propertyConvention: PropertyConvention.Lenient))
+            using (JsConfig.With(new Config { PropertyConvention = PropertyConvention.Lenient }))
             {
                 dto = json.FromJson<ErrorPoco>();
 
@@ -276,7 +277,7 @@ namespace ServiceStack.Text.Tests.JsonTests
 
             var dto = new ModelInt { Int = 0 };
 
-            using (JsConfig.With(includeNullValues: true))
+            using (JsConfig.With(new Config { IncludeNullValues = true }))
             {
                 Assert.That(dto.ToJson(), Is.EqualTo("{\"Int\":-1}"));
             }
@@ -327,8 +328,8 @@ namespace ServiceStack.Text.Tests.JsonTests
             {
                 return new Dictionary<string, string>
                 {
-                    { "Voltage", $"{Voltage:0.0} V"},
-                    { "Current", $"{Current:0.000} A"},
+                    { "Voltage", string.Format(CultureInfo.InvariantCulture, "{0:0.0} V", Voltage)},
+                    { "Current", string.Format(CultureInfo.InvariantCulture, "{0:0.000} A", Current)}, // Use $"{Current:0.000} A" if you don't care about culture
                     { "Power", $"{Power:0} W"},
                 }.ToJson();
             }
@@ -353,8 +354,8 @@ namespace ServiceStack.Text.Tests.JsonTests
             Assert.That(test.ToJson(), Is.EqualTo("{\"Voltage\":\"10.0 V\",\"Current\":\"1.200 A\",\"Power\":\"12 W\"}"));
 
             JsConfig<DcStatusRawFn>.RawSerializeFn = o => new Dictionary<string, string> {
-                { "Voltage", $"{o.Voltage:0.0} V"},
-                { "Current", $"{o.Current:0.000} A"},
+                { "Voltage", string.Format(CultureInfo.InvariantCulture, "{0:0.0} V", o.Voltage)},
+                { "Current", string.Format(CultureInfo.InvariantCulture, "{0:0.000} A", o.Current)},
                 { "Power", $"{o.Power:0} W"},
             }.ToJson();
 

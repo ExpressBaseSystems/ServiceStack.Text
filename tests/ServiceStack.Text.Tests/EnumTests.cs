@@ -36,7 +36,7 @@ namespace ServiceStack.Text.Tests
             public EnumWithFlags? NullableFlagsEnum { get; set; }
             public EnumWithoutFlags? NullableNoFlagsEnum { get; set; }
         }
-
+        
         [Test]
         public void Can_correctly_serialize_enums()
         {
@@ -152,7 +152,7 @@ namespace ServiceStack.Text.Tests
             Assert.That("DoubleWord".FromJson<EnumStyles>(), Is.EqualTo(EnumStyles.DoubleWord));
             Assert.That("Underscore_Words".FromJson<EnumStyles>(), Is.EqualTo(EnumStyles.Underscore_Words));
 
-            using (JsConfig.With(emitLowercaseUnderscoreNames: true))
+            using (JsConfig.With(new Config { TextCase = TextCase.SnakeCase }))
             {
                 Assert.That("Double_Word".FromJson<EnumStyles>(), Is.EqualTo(EnumStyles.DoubleWord));
                 Assert.That("Underscore_Words".FromJson<EnumStyles>(), Is.EqualTo(EnumStyles.Underscore_Words));
@@ -169,7 +169,7 @@ namespace ServiceStack.Text.Tests
         [Test]
         public void Can_deserialize_null_Nullable_Enum()
         {
-            JsConfig.ThrowOnDeserializationError = true;
+            JsConfig.ThrowOnError = true;
             string json = @"{""myEnum"":null}";
             var o = json.FromJson<NullableEnum>();
             Assert.That(o.MyEnum, Is.Null);
@@ -180,7 +180,7 @@ namespace ServiceStack.Text.Tests
         [Test]
         public void Does_write_EnumValues_when_ExcludeDefaultValues()
         {
-            using (JsConfig.With(excludeDefaultValues:true))
+            using (JsConfig.With(new Config { ExcludeDefaultValues = true }))
             {
                 Assert.That(new ClassWithEnums
                 {
@@ -193,7 +193,7 @@ namespace ServiceStack.Text.Tests
                 }.ToJson(), Is.EqualTo("{\"FlagsEnum\":0,\"NoFlagsEnum\":\"Zero\"}"));
             }
 
-            using (JsConfig.With(excludeDefaultValues:true, includeDefaultEnums:false))
+            using (JsConfig.With(new Config { ExcludeDefaultValues = true, IncludeDefaultEnums = false }))
             {
                 Assert.That(new ClassWithEnums
                 {
@@ -205,6 +205,110 @@ namespace ServiceStack.Text.Tests
                     NoFlagsEnum = EnumWithoutFlags.Zero
                 }.ToJson(), Is.EqualTo("{}"));
             }
+        }
+        
+        [DataContract]
+        public enum Day
+        {
+            [EnumMember(Value = "MON")]
+            Monday,
+            [EnumMember(Value = "TUE")]
+            Tuesday,
+            [EnumMember(Value = "WED")]
+            Wednesday,
+            [EnumMember(Value = "THU")]
+            Thursday,
+            [EnumMember(Value = "FRI")]
+            Friday,
+            [EnumMember(Value = "SAT")]
+            Saturday,
+            [EnumMember(Value = "SUN")]
+            Sunday,            
+        }
+
+        class EnumMemberDto
+        {
+            public Day Day { get; set; }
+
+            public Day? NDay { get; set; }
+        }
+
+        [Test]
+        public void Does_serialize_EnumMember_Value()
+        {
+            var dto = new EnumMemberDto { Day = Day.Sunday };
+
+            var json = dto.ToJson();
+            Assert.That(json, Is.EqualTo("{\"Day\":\"SUN\"}"));
+            var fromDto = json.FromJson<EnumMemberDto>();
+            Assert.That(fromDto.Day, Is.EqualTo(Day.Sunday));
+
+            var jsv = dto.ToJsv();
+            Assert.That(jsv, Is.EqualTo("{Day:SUN}"));
+            fromDto = jsv.FromJsv<EnumMemberDto>();
+            Assert.That(fromDto.Day, Is.EqualTo(Day.Sunday));
+
+            var csv = dto.ToCsv();
+            Assert.That(csv.NormalizeNewLines(), Is.EqualTo("Day,NDay\nSUN,\n".NormalizeNewLines()));
+        }
+
+        [Test]
+        public void Does_serialize_EnumMember_enum()
+        {
+            Assert.That(Day.Sunday.ToJson(), Is.EqualTo("\"SUN\""));
+            Assert.That(Day.Sunday.ToJsv(), Is.EqualTo("SUN"));
+            Assert.That(Day.Sunday.ToCsv(), Is.EqualTo("SUN"));
+            
+            Assert.That(((Day?)Day.Sunday).ToJson(), Is.EqualTo("\"SUN\""));
+            Assert.That(((Day?)Day.Sunday).ToJsv(), Is.EqualTo("SUN"));
+            Assert.That(((Day?)Day.Sunday).ToCsv(), Is.EqualTo("SUN"));
+        }
+
+        [Test]
+        public void Can_deserialize_EnumMember_with_int_value()
+        {
+            var fromDto = "{\"Day\":1}".FromJson<EnumMemberDto>();
+            Assert.That(fromDto.Day, Is.EqualTo(Day.Tuesday));
+        }
+
+        public class GetDayOfWeekAsInt
+        {
+            public DayOfWeek DayOfWeek { get; set; }
+        }
+
+        [Test]
+        public void Can_override_TreatEnumAsInteger()
+        {
+            JsConfig.Init(new Config
+            {
+                TreatEnumAsInteger = false,
+            });
+
+            using (JsConfig.With(new Config
+            {
+                TreatEnumAsInteger = true
+            }))
+            {
+                Assert.That(new GetDayOfWeekAsInt { DayOfWeek = DayOfWeek.Tuesday }.ToJson(), Is.EqualTo("{\"DayOfWeek\":2}"));
+                Assert.That("{\"DayOfWeek\":2}".FromJson<GetDayOfWeekAsInt>().DayOfWeek, Is.EqualTo(DayOfWeek.Tuesday));
+            }
+
+            Assert.That(new GetDayOfWeekAsInt { DayOfWeek = DayOfWeek.Tuesday }.ToJson(), Is.EqualTo("{\"DayOfWeek\":\"Tuesday\"}"));
+            Assert.That("{\"DayOfWeek\":\"Tuesday\"}".FromJson<GetDayOfWeekAsInt>().DayOfWeek, Is.EqualTo(DayOfWeek.Tuesday));
+            
+            JsConfig.Reset();
+        }
+
+        public class FeatureDto
+        {
+            public LicenseFeature Feature { get; set; }
+        }
+        
+        [Test]
+        public void Can_deserialize_Flag_Enum_with_multiple_same_values()
+        {
+            var key = "{\"Feature\":\"Premium\"}".FromJson<FeatureDto>();
+            Assert.That(key.Feature, Is.EqualTo(LicenseFeature.Premium));
         }
 
     }
